@@ -25,7 +25,6 @@ import dev.tune.player.data.albumComparator
 import dev.tune.player.data.artistComparator
 import dev.tune.player.data.findDuplicates
 import dev.tune.player.data.folderComparator
-import dev.tune.player.data.gainToVolume
 import dev.tune.player.data.genreComparator
 import dev.tune.player.data.playlistComparator
 import dev.tune.player.data.totalPlays
@@ -237,11 +236,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@collect
                 }
                 val info = withContext(Dispatchers.IO) { ReplayGainReader.read(song.path) }
-                val db = when (mode) {
-                    ReplayGainMode.ALBUM -> info.albumGainDb ?: info.trackGainDb
-                    else -> info.trackGainDb ?: info.albumGainDb
-                }
-                player.setVolume(gainToVolume(db))
+                player.setVolume(info.volumeFor(mode))
             }
         }
 

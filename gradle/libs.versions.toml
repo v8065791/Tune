@@ -26,6 +26,7 @@ coil = "2.7.0"
 kotlinx-serialization-json = "1.7.3"
 
 [libraries]
+junit = { group = "junit", name = "junit", version = "4.13.2" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "compose-material-icons" }

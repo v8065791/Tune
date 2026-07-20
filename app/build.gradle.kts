@@ -24,8 +24,8 @@ android {
         applicationId = "dev.tune.player"
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
-        versionCode = 12
-        versionName = "3.0"
+        versionCode = 13
+        versionName = "3.1"
     }
 
     signingConfigs {
@@ -88,6 +88,8 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
 
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

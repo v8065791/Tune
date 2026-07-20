@@ -193,9 +193,10 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
         item {
             Text(
-                text = "ReplayGain reads the gain tag written by tools like foobar2000 or " +
-                    "rsgain. Only MP3 and FLAC tags are read, and only loud tracks are turned " +
-                    "down — quiet ones are left alone to avoid clipping.",
+                text = "Reads the gain tag written by tools like foobar2000 or rsgain, in MP3, " +
+                    "FLAC, Ogg Vorbis and Opus. Opus R128 tags are converted to the same scale. " +
+                    "Quiet tracks are only boosted as far as the peak tag says is safe; without " +
+                    "one they are left alone rather than risking clipping.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
