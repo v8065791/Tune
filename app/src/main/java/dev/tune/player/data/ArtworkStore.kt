@@ -51,15 +51,19 @@ class ArtworkStore(private val context: Context) {
         )
     }
 
-    suspend fun setAlbumArt(albumId: Long, source: Uri) = withContext(Dispatchers.IO) {
-        val stored = copyIn(source, "album-$albumId") ?: return@withContext
+    /** @return null on success, or a human-readable reason the image could not be saved. */
+    suspend fun setAlbumArt(albumId: Long, source: Uri): String? = withContext(Dispatchers.IO) {
+        val stored = copyIn(source, "album-$albumId").getOrElse { return@withContext it.describe() }
         update { it.copy(albumArt = it.albumArt + (albumId to stored)) }
     }
 
-    suspend fun setArtistArt(artistId: Long, source: Uri) = withContext(Dispatchers.IO) {
-        val stored = copyIn(source, "artist-$artistId") ?: return@withContext
+    /** @return null on success, or a human-readable reason the image could not be saved. */
+    suspend fun setArtistArt(artistId: Long, source: Uri): String? = withContext(Dispatchers.IO) {
+        val stored = copyIn(source, "artist-$artistId").getOrElse { return@withContext it.describe() }
         update { it.copy(artistArt = it.artistArt + (artistId to stored)) }
     }
+
+    private fun Throwable.describe() = this::class.simpleName + ": " + (message ?: "unknown error")
 
     suspend fun clearAlbumArt(albumId: Long) = withContext(Dispatchers.IO) {
         _overrides.value.albumArt[albumId]?.let { File(it).delete() }
@@ -74,20 +78,29 @@ class ArtworkStore(private val context: Context) {
     /**
      * Copies the picked image into app storage under a fresh filename. The name changes on every
      * write so Coil's disk/memory cache can't serve the previous image back.
+     *
+     * Failures are returned rather than swallowed: a silently ignored error here looks exactly
+     * like "the button does nothing".
      */
-    private fun copyIn(source: Uri, baseName: String): String? = runCatching {
-        artDir.listFiles { f -> f.name.startsWith("$baseName-") }?.forEach { it.delete() }
-        val target = File(artDir, "$baseName-${System.currentTimeMillis()}.img")
-        context.contentResolver.openInputStream(source)?.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
-        } ?: return null
-        target.absolutePath
-    }.getOrNull()
+    private fun copyIn(source: Uri, baseName: String): Result<String> = runCatching {
+        val dir = artDir
+        check(dir.isDirectory) { "Could not create ${dir.absolutePath}" }
+        dir.listFiles { f -> f.name.startsWith("$baseName-") }?.forEach { it.delete() }
 
-    private fun update(transform: (ArtworkOverrides) -> ArtworkOverrides) {
+        val target = File(dir, "$baseName-${System.currentTimeMillis()}.img")
+        val stream = context.contentResolver.openInputStream(source)
+            ?: error("Could not read the selected image")
+        stream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+
+        check(target.length() > 0) { "The selected image was empty" }
+        target.absolutePath
+    }
+
+    /** @return null on success, or the reason the index could not be written. */
+    private fun update(transform: (ArtworkOverrides) -> ArtworkOverrides): String? {
         val next = transform(_overrides.value)
         _overrides.value = next
-        runCatching {
+        return runCatching {
             indexFile.writeText(
                 json.encodeToString(
                     OverridesFile(
@@ -96,7 +109,7 @@ class ArtworkStore(private val context: Context) {
                     )
                 )
             )
-        }
+        }.exceptionOrNull()?.describe()
     }
 
     private fun Map<String, String>.mapNotNullKeysToLong(): Map<Long, String> =

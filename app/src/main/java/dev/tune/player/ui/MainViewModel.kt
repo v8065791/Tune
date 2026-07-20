@@ -169,14 +169,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return ArtRequest(overridePath = override, audioPath = artist.songs.firstOrNull()?.path)
     }
 
+    /** Transient user-facing messages, e.g. why an artwork change failed. */
+    private val _messages = MutableStateFlow<String?>(null)
+    val messages: StateFlow<String?> = _messages.asStateFlow()
+
+    fun clearMessage() { _messages.value = null }
+
     fun setAlbumArt(albumId: Long, uri: Uri) =
-        viewModelScope.launch { repository.artwork.setAlbumArt(albumId, uri) }
+        viewModelScope.launch {
+            repository.artwork.setAlbumArt(albumId, uri)?.let {
+                _messages.value = "Couldn't set album image — $it"
+            }
+        }
 
     fun clearAlbumArt(albumId: Long) =
         viewModelScope.launch { repository.artwork.clearAlbumArt(albumId) }
 
     fun setArtistArt(artistId: Long, uri: Uri) =
-        viewModelScope.launch { repository.artwork.setArtistArt(artistId, uri) }
+        viewModelScope.launch {
+            repository.artwork.setArtistArt(artistId, uri)?.let {
+                _messages.value = "Couldn't set artist image — $it"
+            }
+        }
 
     fun clearArtistArt(artistId: Long) =
         viewModelScope.launch { repository.artwork.clearArtistArt(artistId) }
