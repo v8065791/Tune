@@ -1,0 +1,162 @@
+package dev.tune.player.player
+
+import android.content.ComponentName
+import android.content.ContentUris
+import android.content.Context
+import android.net.Uri
+import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import dev.tune.player.data.Song
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+/** A snapshot of playback, kept flat so Compose can read it without touching the player. */
+data class PlayerState(
+    val currentSongId: Long? = null,
+    val isPlaying: Boolean = false,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val shuffle: Boolean = false,
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    val queueSize: Int = 0,
+    val queueIndex: Int = 0,
+)
+
+/**
+ * Wraps the [MediaController] connection to [PlaybackService] and mirrors playback into a
+ * [StateFlow]. Every call is a no-op until the connection lands, so the UI can bind immediately.
+ */
+class PlayerController(private val context: Context, private val scope: CoroutineScope) {
+
+    private var controller: MediaController? = null
+
+    private val _state = MutableStateFlow(PlayerState())
+    val state: StateFlow<PlayerState> = _state.asStateFlow()
+
+    private val listener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) = syncState()
+    }
+
+    fun connect() {
+        if (controller != null) return
+        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val future = MediaController.Builder(context, token).buildAsync()
+        future.addListener({
+            controller = runCatching { future.get() }.getOrNull()?.also {
+                it.addListener(listener)
+                syncState()
+            }
+        }, ContextCompat.getMainExecutor(context))
+
+        // The player reports position only on demand, so poll while something is playing.
+        scope.launch {
+            while (true) {
+                if (_state.value.isPlaying) syncState()
+                delay(POSITION_POLL_MS)
+            }
+        }
+    }
+
+    fun release() {
+        controller?.removeListener(listener)
+        controller?.release()
+        controller = null
+    }
+
+    /** Replaces the queue with [songs] and starts at [startIndex]. */
+    fun play(songs: List<Song>, startIndex: Int = 0) {
+        val player = controller ?: return
+        if (songs.isEmpty()) return
+        player.setMediaItems(songs.map(::toMediaItem), startIndex.coerceIn(songs.indices), 0L)
+        player.prepare()
+        player.play()
+    }
+
+    fun togglePlayPause() {
+        val player = controller ?: return
+        if (player.isPlaying) player.pause() else player.play()
+    }
+
+    fun next() = controller?.seekToNextMediaItem() ?: Unit
+
+    /** When true, Previous restarts the track past the threshold instead of always skipping. */
+    var rewindOnPrevious: Boolean = true
+
+    fun previous() {
+        val player = controller ?: return
+        if (rewindOnPrevious && player.currentPosition > RESTART_THRESHOLD_MS) player.seekTo(0)
+        else player.seekToPreviousMediaItem()
+    }
+
+    fun seekTo(positionMs: Long) = controller?.seekTo(positionMs) ?: Unit
+
+    fun toggleShuffle() {
+        val player = controller ?: return
+        player.shuffleModeEnabled = !player.shuffleModeEnabled
+    }
+
+    fun cycleRepeatMode() {
+        val player = controller ?: return
+        player.repeatMode = when (player.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+    }
+
+    fun addToQueue(songs: List<Song>) {
+        controller?.addMediaItems(songs.map(::toMediaItem))
+    }
+
+    private fun syncState() {
+        val player = controller ?: return
+        _state.value = PlayerState(
+            currentSongId = player.currentMediaItem?.mediaId?.toLongOrNull(),
+            isPlaying = player.isPlaying,
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+            durationMs = player.duration.takeIf { it > 0 } ?: 0L,
+            shuffle = player.shuffleModeEnabled,
+            repeatMode = player.repeatMode,
+            queueSize = player.mediaItemCount,
+            queueIndex = player.currentMediaItemIndex,
+        )
+    }
+
+    private fun toMediaItem(song: Song): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(song.id.toString())
+            .setUri(song.uri)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artist)
+                    .setAlbumTitle(song.album)
+                    .setAlbumArtist(song.albumArtist ?: song.artist)
+                    .setTrackNumber(song.track.takeIf { it > 0 })
+                    .setRecordingYear(song.year.takeIf { it > 0 })
+                    // MediaStore's album-art provider is what the notification can actually read;
+                    // in-app art comes from the file's own tags via ArtFetcher.
+                    .setArtworkUri(albumArtUri(song.albumId))
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
+
+    private fun albumArtUri(albumId: Long): Uri =
+        ContentUris.withAppendedId(ALBUM_ART_BASE, albumId)
+
+    private companion object {
+        const val POSITION_POLL_MS = 500L
+        const val RESTART_THRESHOLD_MS = 3_000L
+        val ALBUM_ART_BASE: Uri = Uri.parse("content://media/external/audio/albumart")
+    }
+}

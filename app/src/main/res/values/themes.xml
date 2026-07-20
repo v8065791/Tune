@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the real theme; this only styles the pre-Compose window. -->
+    <style name="Theme.Tune" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/background_dark</item>
+    </style>
+</resources>

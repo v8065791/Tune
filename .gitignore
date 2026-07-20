@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+# Match build dirs at any depth — a bare "/build" misses app/build.
+build/
+/captures
+.externalNativeBuild
+.cxx
+
+# Signing credentials — never commit these.
+keystore.properties
+*.jks
+*.keystore
