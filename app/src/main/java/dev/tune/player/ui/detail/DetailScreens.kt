@@ -27,6 +27,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -341,19 +344,7 @@ private fun DetailScaffold(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Box(contentAlignment = Alignment.BottomEnd) {
-                        art(Modifier.size(200.dp))
-                        IconButton(
-                            onClick = onEditArt,
-                            modifier = Modifier.padding(4.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Change image",
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
+                    art(Modifier.size(200.dp))
 
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -369,17 +360,29 @@ private fun DetailScaffold(
                         textAlign = TextAlign.Center,
                     )
 
-                    if (hasCustomArt) {
-                        OutlinedButton(onClick = onClearArt, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("Use embedded artwork")
-                        }
-                    }
+                    ArtworkSourceToggle(
+                        hasCustomArt = hasCustomArt,
+                        onUseEmbedded = onClearArt,
+                        onUseCustom = onEditArt,
+                    )
 
                     PlayButtons(onPlay = onPlay, onShuffle = onShuffle)
                 }
             }
 
+            // Only label discs when there's more than one — a single-disc album needs no header.
+            val multiDisc = songs.mapNotNull { it.disc.takeIf { d -> d > 0 } }.distinct().size > 1
+
             itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                if (multiDisc && (index == 0 || songs[index - 1].disc != song.disc)) {
+                    Text(
+                        text = "Disc ${song.disc}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                    )
+                }
                 SongRow(
                     song = song,
                     art = vm.artForSong(song),
@@ -390,6 +393,38 @@ private fun DetailScaffold(
                         ?: formatDuration(song.durationMs),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Chooses where this album's or artist's image comes from.
+ *
+ * Shown as an explicit labelled toggle rather than an icon floating over the artwork — an overlaid
+ * icon disappears against a dark cover, which made the feature impossible to find.
+ */
+@Composable
+private fun ArtworkSourceToggle(
+    hasCustomArt: Boolean,
+    onUseEmbedded: () -> Unit,
+    onUseCustom: () -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.padding(top = 12.dp)) {
+        SegmentedButton(
+            selected = !hasCustomArt,
+            onClick = onUseEmbedded,
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+        ) {
+            Text("Embedded")
+        }
+        SegmentedButton(
+            selected = hasCustomArt,
+            // Tapping "Custom" always reopens the picker, so an already-custom image
+            // can be swapped without first reverting to the embedded one.
+            onClick = onUseCustom,
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+        ) {
+            Text(if (hasCustomArt) "Custom — change" else "Custom")
         }
     }
 }

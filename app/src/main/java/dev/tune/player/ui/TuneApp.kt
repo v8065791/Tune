@@ -35,6 +35,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val SEARCH = "search"
     const val FOLDER_SETTINGS = "folder_settings"
+    const val HOME_TABS = "home_tabs"
     const val ALBUM = "album/{albumId}"
     const val ARTIST = "artist/{artistId}"
     const val GENRE = "genre/{genreId}"
@@ -95,7 +96,12 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onOpenFolders = { navController.navigate(Routes.FOLDER_SETTINGS) },
+                onOpenHomeTabs = { navController.navigate(Routes.HOME_TABS) },
             )
+        }
+
+        composable(Routes.HOME_TABS) {
+            HomeTabsScreen(vm = vm, onBack = { navController.popBackStack() })
         }
 
         composable(Routes.SEARCH) {

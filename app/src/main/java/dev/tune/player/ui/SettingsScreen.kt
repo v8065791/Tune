@@ -40,7 +40,12 @@ import dev.tune.player.data.ThemeMode
  * persisted state rather than local UI state and there's nothing to "save".
  */
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenFolders: () -> Unit) {
+fun SettingsScreen(
+    vm: MainViewModel,
+    onBack: () -> Unit,
+    onOpenFolders: () -> Unit,
+    onOpenHomeTabs: () -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -131,6 +136,14 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenFolders: () -> U
             }
 
             item { SectionHeader("Appearance") }
+            item {
+                val tabs by vm.homeTabs.collectAsState()
+                ActionRow(
+                    title = "Home tabs",
+                    subtitle = tabs.joinToString(", ") { it.label },
+                    onClick = onOpenHomeTabs,
+                )
+            }
             item {
                 val theme by vm.themeMode.collectAsState()
                 ChoiceRow(
