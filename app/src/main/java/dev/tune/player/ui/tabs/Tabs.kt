@@ -52,9 +52,10 @@ fun SongsTab(
     currentSongId: Long?,
     onSongMenu: (Song) -> Unit,
     modifier: Modifier = Modifier,
+    emptyMessage: String = "No songs found.\nCheck your folder selection in Settings.",
 ) {
     if (songs.isEmpty()) {
-        EmptyState("No songs found.\nCheck your folder selection in Settings.", modifier)
+        EmptyState(emptyMessage, modifier)
         return
     }
     val selection by vm.selection.collectAsState()

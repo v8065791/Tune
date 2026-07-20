@@ -20,6 +20,8 @@ enum class HomeTab(val label: String) {
     ALBUMS("Albums"),
     ARTISTS("Artists"),
     GENRES("Genres"),
+    FAVOURITES("Favourites"),
+    MOST_PLAYED("Most played"),
     PLAYLISTS("Playlists"),
     FOLDERS("Folders"),
 }

@@ -92,4 +92,15 @@ enum class SortOrder(val label: String) {
     YEAR("Year"),
     DURATION("Duration"),
     DATE_ADDED("Date added"),
+    MOST_PLAYED("Most played"),
+    RECENTLY_PLAYED("Recently played"),
+}
+
+/** Sort orders for the album, artist and genre grids. */
+enum class GroupSortOrder(val label: String) {
+    NAME("Name"),
+    YEAR("Year"),
+    TRACK_COUNT("Track count"),
+    MOST_PLAYED("Most played"),
+    RECENTLY_PLAYED("Recently played"),
 }

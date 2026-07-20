@@ -1,5 +1,7 @@
 package dev.tune.player.ui
 
+import android.content.Intent
+import android.media.audiofx.AudioEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.tune.player.data.CoverMode
@@ -133,6 +136,25 @@ fun SettingsScreen(
                     subtitle = "Keep shuffle enabled between sessions",
                     checked = keep,
                 ) { value -> vm.edit { setKeepShuffle(value) } }
+            }
+
+            item {
+                val context = LocalContext.current
+                ActionRow(
+                    title = "Equalizer",
+                    subtitle = "Open the system or a third-party equalizer",
+                ) {
+                    // Android has no in-app EQ to call; the convention is to hand the audio
+                    // session to whichever equalizer the user has installed.
+                    val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL)
+                        .putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                        .putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+                    if (intent.resolveActivity(context.packageManager) != null) {
+                        context.startActivity(intent)
+                    } else {
+                        vm.reportMessage("No equalizer app is installed")
+                    }
+                }
             }
 
             item { SectionHeader("Appearance") }

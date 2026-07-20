@@ -24,8 +24,8 @@ android {
         applicationId = "dev.tune.player"
         minSdk = libs.versions.min.sdk.get().toInt()
         targetSdk = libs.versions.target.sdk.get().toInt()
-        versionCode = 9
-        versionName = "2.7"
+        versionCode = 10
+        versionName = "2.8"
     }
 
     signingConfigs {

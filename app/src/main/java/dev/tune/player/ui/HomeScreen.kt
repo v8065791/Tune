@@ -52,6 +52,9 @@ import dev.tune.player.ui.tabs.PlaylistsTab
 import dev.tune.player.ui.tabs.SongsTab
 import kotlinx.coroutines.launch
 
+/** Tabs whose contents are a flat song list, and so respond to the sort order. */
+private val SORTABLE_TABS = setOf(HomeTab.SONGS, HomeTab.FAVOURITES)
+
 /** Contextual toolbar shown in place of the normal one while songs are selected. */
 @Composable
 private fun SelectionBar(
@@ -141,8 +144,8 @@ fun HomeScreen(
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
                     }
-                    // Sorting only applies to the flat song list.
-                    if (currentTab == HomeTab.SONGS) {
+                    // Sorting applies to any tab that renders a flat song list.
+                    if (currentTab in SORTABLE_TABS) {
                         IconButton(onClick = { sortMenuOpen = true }) {
                             Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort songs")
                         }
@@ -200,6 +203,26 @@ fun HomeScreen(
                     HomeTab.ALBUMS -> AlbumsTab(library.albums, vm, onAlbumClick)
                     HomeTab.ARTISTS -> ArtistsTab(library.artists, vm, onArtistClick)
                     HomeTab.GENRES -> GenresTab(library.genres, onGenreClick)
+                    HomeTab.FAVOURITES -> {
+                        val favourites by vm.favouriteSongs.collectAsState()
+                        SongsTab(
+                            songs = favourites,
+                            vm = vm,
+                            currentSongId = playerState.currentSongId,
+                            onSongMenu = onSongMenu,
+                            emptyMessage = "No favourites yet.\nTap the heart on the player.",
+                        )
+                    }
+                    HomeTab.MOST_PLAYED -> {
+                        val mostPlayed by vm.mostPlayed.collectAsState()
+                        SongsTab(
+                            songs = mostPlayed,
+                            vm = vm,
+                            currentSongId = playerState.currentSongId,
+                            onSongMenu = onSongMenu,
+                            emptyMessage = "Nothing played yet.",
+                        )
+                    }
                     HomeTab.PLAYLISTS -> PlaylistsTab(playlists, onPlaylistClick, onCreatePlaylist)
                     HomeTab.FOLDERS -> FoldersTab(library.folders, onFolderClick)
                     null -> Unit

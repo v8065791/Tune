@@ -34,6 +34,7 @@ class MusicRepository(private val context: Context) {
     val preferences = UserPreferences(context)
     val artwork = ArtworkStore(context)
     val playlists = PlaylistStore(context)
+    val playStats = PlayStatsStore(context)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
 
@@ -55,6 +56,7 @@ class MusicRepository(private val context: Context) {
         val separators: String,
         val autoSortNames: Boolean,
         val hideCollaborators: Boolean,
+        val stats: Map<Long, PlayStat> = emptyMap(),
     )
 
     init {
@@ -73,7 +75,10 @@ class MusicRepository(private val context: Context) {
             }
 
         scope.launch {
-            combine(allSongs, options, ::buildLibrary).collect { _library.value = it }
+            // Play counts feed the "most played" orders, so the library re-sorts as they change.
+            combine(allSongs, options, playStats.stats) { songs, opts, stats ->
+                buildLibrary(songs, opts.copy(stats = stats))
+            }.collect { _library.value = it }
         }
 
         // Rescan when the system reports the media library changed, if the user wants it.
@@ -112,6 +117,7 @@ class MusicRepository(private val context: Context) {
     suspend fun initialise() {
         artwork.load()
         playlists.load()
+        playStats.load()
         refresh()
     }
 
@@ -238,7 +244,7 @@ class MusicRepository(private val context: Context) {
             .sortedBy { it.path }
 
         Library(
-            songs = visible.sortedWith(sort.comparator(collator)),
+            songs = visible.sortedWith(sort.comparator(collator, options.stats)),
             albums = albums,
             artists = artists,
             genres = genres,
@@ -265,8 +271,14 @@ private fun String.splitTags(separators: String): List<String> {
         .ifEmpty { listOf(this) }
 }
 
-/** Orders names either literally or with a leading article ignored ("The Beatles" under B). */
+/**
+ * Orders names the way a person would read them.
+ *
+ * Comparison is natural rather than lexical, so "Track 2" sorts before "Track 10" instead of
+ * after it. Optionally ignores a leading article, filing "The Beatles" under B.
+ */
 class NameCollator(private val ignoreArticles: Boolean) {
+
     fun key(name: String): String {
         val lower = name.lowercase()
         if (!ignoreArticles) return lower
@@ -276,7 +288,36 @@ class NameCollator(private val ignoreArticles: Boolean) {
         return lower
     }
 
-    fun <T> comparingBy(select: (T) -> String): Comparator<T> = compareBy { key(select(it)) }
+    fun <T> comparingBy(select: (T) -> String): Comparator<T> =
+        Comparator { a, b -> compareNatural(key(select(a)), key(select(b))) }
+
+    /** Walks both strings together, comparing runs of digits as numbers and the rest as text. */
+    private fun compareNatural(a: String, b: String): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            val ca = a[i]
+            val cb = b[j]
+
+            if (ca.isDigit() && cb.isDigit()) {
+                val startA = i
+                val startB = j
+                while (i < a.length && a[i].isDigit()) i++
+                while (j < b.length && b[j].isDigit()) j++
+                // Compare as numbers, so leading zeros don't change the order.
+                val numA = a.substring(startA, i).trimStart('0')
+                val numB = b.substring(startB, j).trimStart('0')
+                if (numA.length != numB.length) return numA.length - numB.length
+                val cmp = numA.compareTo(numB)
+                if (cmp != 0) return cmp
+            } else {
+                if (ca != cb) return ca.compareTo(cb)
+                i++
+                j++
+            }
+        }
+        return (a.length - i) - (b.length - j)
+    }
 
     private companion object {
         val ARTICLES = listOf("the ", "a ", "an ")
@@ -295,7 +336,10 @@ private fun Song.albumArtistName(): String = albumArtist?.takeIf { it.isNotBlank
  */
 private fun artistIdOf(name: String): Long = name.lowercase().hashCode().toLong()
 
-fun SortOrder.comparator(collator: NameCollator = NameCollator(false)): Comparator<Song> = when (this) {
+fun SortOrder.comparator(
+    collator: NameCollator = NameCollator(false),
+    stats: Map<Long, PlayStat> = emptyMap(),
+): Comparator<Song> = when (this) {
     SortOrder.TITLE -> collator.comparingBy { it.title }
     SortOrder.ARTIST ->
         collator.comparingBy<Song> { it.artist }
@@ -305,4 +349,6 @@ fun SortOrder.comparator(collator: NameCollator = NameCollator(false)): Comparat
     SortOrder.YEAR -> compareByDescending<Song> { it.year }.thenBy { it.title.lowercase() }
     SortOrder.DURATION -> compareBy { it.durationMs }
     SortOrder.DATE_ADDED -> compareByDescending { it.dateAddedSeconds }
+    SortOrder.MOST_PLAYED -> compareByDescending { stats[it.id]?.count ?: 0 }
+    SortOrder.RECENTLY_PLAYED -> compareByDescending { stats[it.id]?.lastPlayedEpochMs ?: 0L }
 }

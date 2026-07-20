@@ -14,6 +14,7 @@ import dev.tune.player.data.FolderMode
 import dev.tune.player.data.Genre
 import dev.tune.player.data.HomeTab
 import dev.tune.player.data.PlayInMode
+import dev.tune.player.data.totalPlays
 import dev.tune.player.data.Playlist
 import dev.tune.player.data.Song
 import dev.tune.player.data.SortOrder
@@ -178,6 +179,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.rewindOnPrevious.collect { player.rewindOnPrevious = it }
         }
 
+        // Count a play when the track actually changes, not when it is queued.
+        viewModelScope.launch {
+            var lastCounted: Long? = null
+            playerState.collect { state ->
+                val id = state.currentSongId
+                if (id != null && state.isPlaying && id != lastCounted) {
+                    lastCounted = id
+                    repository.playStats.recordPlay(id, System.currentTimeMillis())
+                }
+            }
+        }
+
         // Persist the queue as it changes, so it survives the process being killed.
         viewModelScope.launch {
             playerState.collect { state ->
@@ -297,6 +310,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Favourites & playback rate ----------------------------------------
 
     val favourites = preferences.favourites.asState(emptySet())
+
+    val playStats = repository.playStats.stats
+
+    /** Songs marked favourite, in library order. */
+    val favouriteSongs: StateFlow<List<Song>> =
+        combine(library, favourites) { lib, ids -> lib.songs.filter { it.id in ids } }
+            .asState(emptyList())
+
+    /** Most played first, excluding anything never played. */
+    val mostPlayed: StateFlow<List<Song>> =
+        combine(library, playStats) { lib, stats ->
+            lib.songs
+                .filter { (stats[it.id]?.count ?: 0) > 0 }
+                .sortedByDescending { stats[it.id]?.count ?: 0 }
+        }.asState(emptyList())
+
+    fun playCount(songs: List<Song>): Int = playStats.value.totalPlays(songs)
 
     fun isFavourite(song: Song) = song.id in favourites.value
 
