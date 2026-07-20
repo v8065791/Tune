@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.tune.player.TuneApplication
 import dev.tune.player.art.ArtRequest
+import dev.tune.player.data.AccentColour
 import dev.tune.player.data.Album
 import dev.tune.player.data.Artist
 import dev.tune.player.data.CoverMode
@@ -77,6 +78,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val squareCovers = preferences.squareCovers.asState(true)
     val roundedCorners = preferences.roundedCorners.asState(true)
     val homeTabs = preferences.homeTabs.asState(HomeTab.entries.toList())
+    val accent = preferences.accent.asState(AccentColour.PURPLE)
+    val gridView = preferences.gridView.asState(true)
+
     val observing = preferences.observing.asState(true)
     val autoSortNames = preferences.autoSortNames.asState(true)
     val hideCollaborators = preferences.hideCollaborators.asState(false)
@@ -178,6 +182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferences.rewindOnPrevious.collect { player.rewindOnPrevious = it }
         }
+
 
         // Count a play when the track actually changes, not when it is queued.
         viewModelScope.launch {

@@ -50,7 +50,14 @@ class MainActivity : ComponentActivity() {
             val squareCovers by vm.squareCovers.collectAsState()
             val roundedCorners by vm.roundedCorners.collectAsState()
 
-            TuneTheme(themeMode = themeMode, blackTheme = blackTheme, dynamicColor = dynamicColor) {
+            val accent by vm.accent.collectAsState()
+
+            TuneTheme(
+                themeMode = themeMode,
+                accent = accent,
+                blackTheme = blackTheme,
+                dynamicColor = dynamicColor,
+            ) {
                 CompositionLocalProvider(
                     LocalArtworkStyle provides ArtworkStyle(
                         showCovers = coverMode != CoverMode.OFF,

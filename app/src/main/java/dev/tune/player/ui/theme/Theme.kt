@@ -10,6 +10,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import dev.tune.player.data.AccentColour
 import dev.tune.player.data.ThemeMode
 
 private val Purple = Color(0xFF7C5CFF)
@@ -40,6 +41,7 @@ private val LightColors = lightColorScheme(
 @Composable
 fun TuneTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    accent: AccentColour = AccentColour.PURPLE,
     /** True black surfaces in dark mode, so OLED panels can switch pixels off entirely. */
     blackTheme: Boolean = false,
     /** Material You wallpaper colours, where the platform supports them. */
@@ -58,6 +60,16 @@ fun TuneTheme(
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         darkTheme -> DarkColors
         else -> LightColors
+    }
+
+    if (!(dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)) {
+        // Only recolour the fixed schemes — overriding dynamic colours would defeat Material You.
+        val seed = Color(accent.rgb)
+        colors = if (darkTheme) {
+            colors.copy(primary = seed, primaryContainer = seed.copy(alpha = 0.35f))
+        } else {
+            colors.copy(primary = seed, onPrimary = Color.White)
+        }
     }
 
     if (darkTheme && blackTheme) {

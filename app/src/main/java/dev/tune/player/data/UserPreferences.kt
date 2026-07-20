@@ -38,6 +38,18 @@ enum class FolderMode(val label: String) {
     INCLUDE("Include only selected"),
 }
 
+/** Accent colours, used when Material You is off or unavailable. */
+enum class AccentColour(val label: String, val rgb: Long) {
+    PURPLE("Purple", 0xFF7C5CFF),
+    BLUE("Blue", 0xFF2E7BE0),
+    TEAL("Teal", 0xFF00897B),
+    GREEN("Green", 0xFF2E7D32),
+    YELLOW("Amber", 0xFFF9A825),
+    ORANGE("Orange", 0xFFEF6C00),
+    RED("Red", 0xFFD32F2F),
+    PINK("Pink", 0xFFC2185B),
+}
+
 /** App theme, independent of the "black" (AMOLED) toggle. */
 enum class ThemeMode(val label: String) {
     SYSTEM("Follow system"),
@@ -98,6 +110,9 @@ class UserPreferences(private val context: Context) {
         val squareCovers = booleanPreferencesKey("square_covers")
         val roundedCorners = booleanPreferencesKey("rounded_corners")
         val homeTabs = stringPreferencesKey("home_tabs")
+        val accent = stringPreferencesKey("accent_colour")
+        val gridView = booleanPreferencesKey("grid_view")
+        val skipSilence = booleanPreferencesKey("skip_silence")
 
         // Favourites and resume state
         val favourites = stringSetPreferencesKey("favourite_songs")
@@ -253,6 +268,23 @@ class UserPreferences(private val context: Context) {
             ?.mapNotNull { name -> HomeTab.entries.firstOrNull { it.name == name } }
         stored?.takeIf { it.isNotEmpty() } ?: HomeTab.entries.toList()
     }
+
+    val accent: Flow<AccentColour> = flow { prefs ->
+        prefs[Keys.accent]?.let { n -> AccentColour.entries.firstOrNull { it.name == n } }
+            ?: AccentColour.PURPLE
+    }
+
+    /** Albums and artists as a grid, or as a denser list. */
+    val gridView: Flow<Boolean> = flow { it[Keys.gridView] ?: true }
+
+    /** Trims silence at track boundaries, on top of ExoPlayer's native gapless handling. */
+    val skipSilence: Flow<Boolean> = flow { it[Keys.skipSilence] ?: false }
+
+    suspend fun setAccent(colour: AccentColour) = edit { it[Keys.accent] = colour.name }
+
+    suspend fun setGridView(value: Boolean) = edit { it[Keys.gridView] = value }
+
+    suspend fun setSkipSilence(value: Boolean) = edit { it[Keys.skipSilence] = value }
 
     suspend fun setThemeMode(mode: ThemeMode) = edit { it[Keys.themeMode] = mode.name }
 

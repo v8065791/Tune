@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.tune.player.data.AccentColour
 import dev.tune.player.data.CoverMode
 import dev.tune.player.data.PlayInMode
 import dev.tune.player.data.ThemeMode
@@ -182,6 +183,17 @@ fun SettingsScreen(
                     subtitle = "True black backgrounds for OLED screens",
                     checked = black,
                 ) { value -> vm.edit { setBlackTheme(value) } }
+            }
+            item {
+                val accent by vm.accent.collectAsState()
+                val dynamicOn by vm.dynamicColor.collectAsState()
+                ChoiceRow(
+                    title = "Accent colour",
+                    // Material You supplies its own accent, so this only applies when it's off.
+                    current = accent,
+                    options = AccentColour.entries,
+                    label = { if (dynamicOn) "${it.label} (Material You is on)" else it.label },
+                ) { value -> vm.edit { setAccent(value) } }
             }
             item {
                 val dynamic by vm.dynamicColor.collectAsState()
