@@ -29,6 +29,7 @@ import dev.tune.player.ui.detail.ArtistDetailScreen
 import dev.tune.player.ui.detail.FolderDetailScreen
 import dev.tune.player.ui.detail.GenreDetailScreen
 import dev.tune.player.ui.detail.PlaylistDetailScreen
+import dev.tune.player.ui.sheets.GenreDialog
 import dev.tune.player.ui.sheets.MetadataSheet
 import dev.tune.player.ui.sheets.PlaylistPickerSheet
 import dev.tune.player.ui.sheets.SongActionsSheet
@@ -83,6 +84,8 @@ fun TuneApp(vm: MainViewModel) {
     var newPlaylistForSong by remember { mutableStateOf<Song?>(null) }
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var playlistPickerForSelection by remember { mutableStateOf(false) }
+    var genreForSong by remember { mutableStateOf<Song?>(null) }
+    var genreForSelection by remember { mutableStateOf(false) }
     val library by vm.library.collectAsState()
 
     // The mini player lives above the NavHost rather than inside any one screen, so it stays put
@@ -114,8 +117,8 @@ fun TuneApp(vm: MainViewModel) {
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenSearch = { navController.navigate(Routes.SEARCH) },
                 onCreatePlaylist = { showNewPlaylistDialog = true },
-                onExpandPlayer = { navController.navigate(Routes.NOW_PLAYING) },
                 onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
 
@@ -282,6 +285,40 @@ fun TuneApp(vm: MainViewModel) {
             onShowMetadata = {
                 vm.showMetadata(song)
                 actionsSong = null
+            },
+            onSetGenre = {
+                genreForSong = song
+                actionsSong = null
+            },
+        )
+    }
+
+    // Assigning a genre stores it in Tune's own data; the audio file is not touched.
+    genreForSong?.let { song ->
+        val suggestions by vm.knownGenres.collectAsState()
+        GenreDialog(
+            songCount = 1,
+            current = song.genre.orEmpty(),
+            suggestions = suggestions,
+            onDismiss = { genreForSong = null },
+            onConfirm = { genre ->
+                vm.assignGenre(listOf(song.id), genre)
+                genreForSong = null
+            },
+        )
+    }
+
+    if (genreForSelection) {
+        val suggestions by vm.knownGenres.collectAsState()
+        val selection by vm.selection.collectAsState()
+        GenreDialog(
+            songCount = selection.size,
+            current = "",
+            suggestions = suggestions,
+            onDismiss = { genreForSelection = false },
+            onConfirm = { genre ->
+                vm.assignGenreToSelection(genre)
+                genreForSelection = false
             },
         )
     }

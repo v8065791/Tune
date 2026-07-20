@@ -141,6 +141,7 @@ fun SongsTab(
                     onClick = { onTap(song, index) },
                     onLongClick = { vm.toggleSelection(song) },
                     selected = if (selecting) song.id in selection else null,
+                    onMenuClick = { onSongMenu(song) },
                 )
             }
         }

@@ -1,6 +1,8 @@
 package dev.tune.player.data
 
+import android.content.ContentUris
 import android.net.Uri
+import android.provider.MediaStore
 import kotlinx.serialization.Serializable
 
 /**
@@ -9,7 +11,6 @@ import kotlinx.serialization.Serializable
  */
 data class Song(
     val id: Long,
-    val uri: Uri,
     val title: String,
     val artist: String,
     val artistId: Long,
@@ -30,6 +31,14 @@ data class Song(
 ) {
     /** Absolute path of the directory holding this file, without a trailing separator. */
     val folderPath: String get() = path.substringBeforeLast('/', "")
+
+    /**
+     * The MediaStore content URI, derived from [id] rather than stored alongside it. One less
+     * field to keep consistent, and it leaves [Song] constructible without Android present —
+     * which is what lets the sorting and duplicate logic be unit tested on the JVM.
+     */
+    val uri: Uri
+        get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
 }
 
 data class Album(

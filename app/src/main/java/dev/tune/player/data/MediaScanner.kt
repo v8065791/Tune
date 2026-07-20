@@ -96,7 +96,6 @@ object MediaScanner {
 
             return Song(
                 id = songId,
-                uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId),
                 title = cursor.getStringOrNull(title) ?: path.substringAfterLast('/'),
                 artist = cursor.getStringOrNull(artist)?.takeUnless { it == UNKNOWN } ?: "Unknown artist",
                 artistId = cursor.getLong(artistId),

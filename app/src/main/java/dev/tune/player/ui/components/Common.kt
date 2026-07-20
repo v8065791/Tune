@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
@@ -210,6 +211,9 @@ fun GridCard(
     onLongClick: (() -> Unit)? = null,
     /** Non-null puts the card in selection mode, overlaying a tick. */
     selected: Boolean? = null,
+    /** When set, an overflow button is drawn on the artwork. Long-press is taken by selection,
+     *  so without this a grid card would have no route to the song's actions at all. */
+    onMenuClick: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -233,6 +237,21 @@ fun GridCard(
                     onCheckedChange = null,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
                 )
+            } else if (onMenuClick != null) {
+                IconButton(
+                    onClick = onMenuClick,
+                    modifier = Modifier.align(Alignment.TopEnd),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options for $title",
+                        // Artwork behind can be any colour, so the icon carries its own scrim.
+                        tint = Color.White,
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                            .padding(2.dp),
+                    )
+                }
             }
         }
         Text(

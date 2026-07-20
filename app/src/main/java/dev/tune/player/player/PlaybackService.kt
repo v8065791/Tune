@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.MediaSessionService
 
 /**
@@ -34,7 +35,11 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        mediaSession = MediaSession.Builder(this, player).build()
+        mediaSession = MediaSession.Builder(this, player)
+            // Cover art has to be resolved from the file's own tags; see the loader for why the
+            // MediaStore albumart URI this used to rely on never worked.
+            .setBitmapLoader(CacheBitmapLoader(EmbeddedArtworkBitmapLoader()))
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

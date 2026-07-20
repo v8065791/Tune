@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -41,6 +42,7 @@ fun SongActionsSheet(
     onGoToAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
     onShowMetadata: () -> Unit,
+    onSetGenre: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
@@ -74,6 +76,7 @@ fun SongActionsSheet(
             ActionRow(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist") { onAddToPlaylist() }
             ActionRow(Icons.Default.Album, "Go to album") { onGoToAlbum(); onDismiss() }
             ActionRow(Icons.Default.Person, "Go to artist") { onGoToArtist(); onDismiss() }
+            ActionRow(Icons.Default.Category, "Set genre") { onSetGenre() }
             ActionRow(Icons.Default.Info, "View metadata") { onShowMetadata() }
         }
     }

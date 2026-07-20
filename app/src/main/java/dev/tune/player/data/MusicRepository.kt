@@ -35,6 +35,7 @@ class MusicRepository(private val context: Context) {
     val artwork = ArtworkStore(context)
     val playlists = PlaylistStore(context)
     val playStats = PlayStatsStore(context)
+    val genres = GenreStore(context)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
 
@@ -82,8 +83,13 @@ class MusicRepository(private val context: Context) {
 
         scope.launch {
             // Play counts feed the "most played" orders, so the library re-sorts as they change.
-            combine(allSongs, options, playStats.stats) { songs, opts, stats ->
-                buildLibrary(songs, opts.copy(stats = stats))
+            combine(
+                allSongs,
+                options,
+                playStats.stats,
+                genres.overrides,
+            ) { songs, opts, stats, genreOverrides ->
+                buildLibrary(songs, opts.copy(stats = stats), genreOverrides)
             }.collect { _library.value = it }
         }
 
@@ -124,6 +130,7 @@ class MusicRepository(private val context: Context) {
         artwork.load()
         playlists.load()
         playStats.load()
+        genres.load()
         refresh()
     }
 
@@ -168,8 +175,17 @@ class MusicRepository(private val context: Context) {
 
     suspend fun currentExcludedFolders(): Set<String> = preferences.excludedFolders.first()
 
-    private suspend fun buildLibrary(songs: List<Song>, options: LibraryOptions): Library =
+    private suspend fun buildLibrary(
+        scanned: List<Song>,
+        options: LibraryOptions,
+        genreOverrides: Map<Long, String>,
+    ): Library =
         withContext(Dispatchers.Default) {
+        // User-assigned genres are layered on before anything is grouped, so the override shows
+        // up everywhere a genre does — the Genres tab, the metadata sheet, search.
+        val songs =
+            if (genreOverrides.isEmpty()) scanned
+            else scanned.map { song -> genreOverrides[song.id]?.let { song.copy(genre = it) } ?: song }
         val sort = options.sort
         val collator = NameCollator(options.autoSortNames)
         // Selecting a directory always covers its subfolders, so picking one top-level folder

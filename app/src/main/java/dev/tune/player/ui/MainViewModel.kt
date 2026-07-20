@@ -89,6 +89,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val groupSortDescending: StateFlow<Boolean> = repository.preferences.groupSortDescending
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /** Null means the detail screens keep each list's natural order. */
+    val detailSort: StateFlow<SortOrder?> = repository.preferences.detailSort
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val detailSortDescending: StateFlow<Boolean> = repository.preferences.detailSortDescending
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     // ---- Settings ----------------------------------------------------------
 
     val preferences = repository.preferences
@@ -210,13 +217,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
 
-        // Count a play when the track actually changes, not when it is queued.
+        // A play is counted once the track has actually been listened to for a while. Counting on
+        // track change instead would let skipping through a queue inflate every count on the way
+        // past. Position running backwards means the track restarted — on repeat, or a seek back
+        // to the beginning — so the same song can legitimately be counted again.
         viewModelScope.launch {
-            var lastCounted: Long? = null
+            var lastId: Long? = null
+            var lastPosition = 0L
+            var counted = false
             playerState.collect { state ->
-                val id = state.currentSongId
-                if (id != null && state.isPlaying && id != lastCounted) {
-                    lastCounted = id
+                val id = state.currentSongId ?: return@collect
+                if (id != lastId || state.positionMs < lastPosition) {
+                    lastId = id
+                    counted = false
+                }
+                lastPosition = state.positionMs
+
+                // Short tracks would never reach a fixed threshold, so cap it at half their length.
+                val threshold =
+                    if (state.durationMs > 0) minOf(PLAY_COUNT_AFTER_MS, state.durationMs / 2)
+                    else PLAY_COUNT_AFTER_MS
+                if (!counted && state.positionMs >= threshold) {
+                    counted = true
                     repository.playStats.recordPlay(id, System.currentTimeMillis())
                 }
             }
@@ -392,6 +414,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setGroupSort(order: GroupSortOrder) =
         viewModelScope.launch { repository.preferences.setGroupSort(order) }
 
+    fun setDetailSort(order: SortOrder?) =
+        viewModelScope.launch { repository.preferences.setDetailSort(order) }
+
+    fun setDetailSortDescending(descending: Boolean) =
+        viewModelScope.launch { repository.preferences.setDetailSortDescending(descending) }
+
+    // ---- Genres ------------------------------------------------------------
+
+    val genreOverrides = repository.genres.overrides
+
+    /** Every genre currently in use, offered as suggestions when assigning one. */
+    val knownGenres: StateFlow<List<String>> =
+        library.map { lib -> lib.genres.map { it.name }.sorted() }.asState(emptyList())
+
+    /**
+     * Assigns a genre to songs. A blank genre clears the assignment and lets each song fall back
+     * to its own tag. Audio files are not modified — see [dev.tune.player.data.GenreStore].
+     */
+    fun assignGenre(songIds: Collection<Long>, genre: String) =
+        viewModelScope.launch { repository.genres.assign(songIds, genre) }
+
+    fun assignGenreToSelection(genre: String) {
+        val ids = _selection.value
+        if (ids.isNotEmpty()) assignGenre(ids, genre)
+        clearSelection()
+    }
+
     fun setSortDescending(descending: Boolean) =
         viewModelScope.launch { repository.preferences.setSortDescending(descending) }
 
@@ -510,6 +559,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val RESTORE_ATTEMPTS = 10
         const val RESTORE_RETRY_MS = 300L
+        const val PLAY_COUNT_AFTER_MS = 30_000L
     }
 
     override fun onCleared() {

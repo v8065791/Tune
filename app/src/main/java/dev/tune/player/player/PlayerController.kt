@@ -1,9 +1,9 @@
 package dev.tune.player.player
 
 import android.content.ComponentName
-import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import java.io.File
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -199,23 +199,21 @@ class PlayerController(private val context: Context, private val scope: Coroutin
                     .setAlbumArtist(song.albumArtist ?: song.artist)
                     .setTrackNumber(song.track.takeIf { it > 0 })
                     .setRecordingYear(song.year.takeIf { it > 0 })
-                    // MediaStore's album-art provider is what the notification can actually read;
-                    // in-app art comes from the file's own tags via ArtFetcher.
-                    .setArtworkUri(albumArtUri(song.albumId))
+                    // Points at the audio file itself, not an image: EmbeddedArtworkBitmapLoader
+                    // extracts the embedded picture from it. The MediaStore albumart URI that
+                    // used to be here is a legacy path that no longer resolves, which is why the
+                    // notification showed no cover at all.
+                    .setArtworkUri(Uri.fromFile(File(song.path)))
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
                     .build()
             )
             .build()
 
-    private fun albumArtUri(albumId: Long): Uri =
-        ContentUris.withAppendedId(ALBUM_ART_BASE, albumId)
-
     private companion object {
         const val POSITION_POLL_MS = 500L
         const val RESTART_THRESHOLD_MS = 3_000L
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 3.0f
-        val ALBUM_ART_BASE: Uri = Uri.parse("content://media/external/audio/albumart")
     }
 }

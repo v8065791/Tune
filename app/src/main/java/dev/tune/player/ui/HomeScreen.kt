@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -76,6 +77,7 @@ private fun SelectionBar(
     onPlay: () -> Unit,
     onQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onSetGenre: () -> Unit,
 ) {
     TopAppBar(
         title = { Text("$count selected") },
@@ -99,6 +101,9 @@ private fun SelectionBar(
                     Icons.AutoMirrored.Filled.PlaylistAdd,
                     contentDescription = "Add selection to playlist",
                 )
+            }
+            IconButton(onClick = onSetGenre) {
+                Icon(Icons.Default.Category, contentDescription = "Set genre for selection")
             }
             IconButton(onClick = onSelectAll) {
                 Icon(Icons.Default.SelectAll, contentDescription = "Select all")
@@ -129,8 +134,8 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
     onCreatePlaylist: () -> Unit,
-    onExpandPlayer: () -> Unit,
     onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
     // Group tabs read pre-sorted flows so the chosen order applies without sorting during layout.
@@ -160,15 +165,28 @@ fun HomeScreen(
 
     val selection by vm.selection.collectAsState()
 
+    val favourites by vm.favouriteSongs.collectAsState()
+    val mostPlayed by vm.mostPlayed.collectAsState()
+
+    // Which song list the current tab is showing — what the selection toolbar acts on.
+    val visibleSongs = when (currentTab) {
+        HomeTab.FAVOURITES -> favourites
+        HomeTab.MOST_PLAYED -> mostPlayed
+        else -> library.songs
+    }
+
     Scaffold(
         topBar = {
             if (selection.isNotEmpty()) SelectionBar(
                 count = selection.size,
                 onClear = { vm.clearSelection() },
-                onSelectAll = { vm.selectAll(library.songs) },
-                onPlay = { vm.playSelection(library.songs) },
-                onQueue = { vm.queueSelection(library.songs) },
+                // Scoped to the tab in view: "select all" on Favourites means the favourites,
+                // not the entire library.
+                onSelectAll = { vm.selectAll(visibleSongs) },
+                onPlay = { vm.playSelection(visibleSongs) },
+                onQueue = { vm.queueSelection(visibleSongs) },
                 onAddToPlaylist = onSelectionToPlaylist,
+                onSetGenre = onSelectionSetGenre,
             ) else TopAppBar(
                 title = { Text("Tune") },
                 actions = {
@@ -267,7 +285,6 @@ fun HomeScreen(
                     HomeTab.ARTISTS -> ArtistsTab(artists, vm, onArtistClick, grid)
                     HomeTab.GENRES -> GenresTab(genres, vm, onGenreClick, grid)
                     HomeTab.FAVOURITES -> {
-                        val favourites by vm.favouriteSongs.collectAsState()
                         SongsTab(
                             songs = favourites,
                             vm = vm,
@@ -278,7 +295,6 @@ fun HomeScreen(
                         )
                     }
                     HomeTab.MOST_PLAYED -> {
-                        val mostPlayed by vm.mostPlayed.collectAsState()
                         SongsTab(
                             songs = mostPlayed,
                             vm = vm,

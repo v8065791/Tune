@@ -89,6 +89,8 @@ class UserPreferences(private val context: Context) {
         val folderMode = stringPreferencesKey("folder_mode")
         val songSort = stringPreferencesKey("song_sort")
         val groupSort = stringPreferencesKey("group_sort")
+        val detailSort = stringPreferencesKey("detail_sort")
+        val detailSortDescending = booleanPreferencesKey("detail_sort_descending")
         val sortDescending = booleanPreferencesKey("sort_descending")
         val groupSortDescending = booleanPreferencesKey("group_sort_descending")
         val replayGain = stringPreferencesKey("replay_gain")
@@ -189,6 +191,27 @@ class UserPreferences(private val context: Context) {
     }
 
     suspend fun setGroupSort(order: GroupSortOrder) = edit { it[Keys.groupSort] = order.name }
+
+    /**
+     * Order for the track list inside an album, artist, playlist, genre or folder.
+     *
+     * `null` means "leave the list as it came", which is the only sensible default: an album is
+     * already in disc and track order, and a playlist is in whatever order the user arranged.
+     * Neither has an entry in [SortOrder] that could reproduce it.
+     */
+    val detailSort: Flow<SortOrder?> = flow { prefs ->
+        prefs[Keys.detailSort]
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { name -> SortOrder.entries.firstOrNull { it.name == name } }
+    }
+
+    val detailSortDescending: Flow<Boolean> = flow { it[Keys.detailSortDescending] ?: false }
+
+    suspend fun setDetailSort(order: SortOrder?) =
+        edit { it[Keys.detailSort] = order?.name ?: "" }
+
+    suspend fun setDetailSortDescending(value: Boolean) =
+        edit { it[Keys.detailSortDescending] = value }
 
     /** Sort direction for song lists and for group tabs, tracked separately. */
     val sortDescending: Flow<Boolean> = flow { it[Keys.sortDescending] ?: false }

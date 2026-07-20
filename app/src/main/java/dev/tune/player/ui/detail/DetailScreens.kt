@@ -17,11 +17,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,19 +42,125 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.tune.player.data.NameCollator
 import dev.tune.player.data.Song
+import dev.tune.player.data.SortOrder
+import dev.tune.player.data.comparator
 import dev.tune.player.ui.MainViewModel
 import dev.tune.player.ui.components.Artwork
 import dev.tune.player.ui.components.EmptyState
 import dev.tune.player.ui.components.SongRow
 import dev.tune.player.ui.components.formatDuration
+
+/**
+ * Applies the detail-screen sort order to a track list.
+ *
+ * Deliberately a composable rather than a ViewModel call: reading `StateFlow.value` from a plain
+ * function does not subscribe, so the list would only re-sort once something unrelated forced a
+ * recomposition. That exact mistake has already caused two bugs in this app.
+ */
+@Composable
+private fun sortedForDetail(vm: MainViewModel, songs: List<Song>): List<Song> {
+    val order by vm.detailSort.collectAsState()
+    val descending by vm.detailSortDescending.collectAsState()
+    val ignoreArticles by vm.autoSortNames.collectAsState()
+    val stats by vm.playStats.collectAsState()
+
+    return remember(songs, order, descending, ignoreArticles, stats) {
+        val comparator = order?.comparator(NameCollator(ignoreArticles), stats, descending)
+        if (comparator == null) songs else songs.sortedWith(comparator)
+    }
+}
+
+/**
+ * The "Songs" header with a sort control, as it sits above every detail track list.
+ *
+ * "Default order" is the first option and the initial state, because each list arrives already
+ * ordered in a way no [SortOrder] reproduces — an album by disc and track, a playlist by however
+ * the user arranged it.
+ */
+@Composable
+private fun SongsHeader(vm: MainViewModel, count: Int) {
+    val order by vm.detailSort.collectAsState()
+    val descending by vm.detailSortDescending.collectAsState()
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Songs",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "$count",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort songs")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Default order") },
+                    trailingIcon = {
+                        if (order == null) Icon(Icons.Default.Check, contentDescription = null)
+                    },
+                    onClick = {
+                        vm.setDetailSort(null)
+                        menuOpen = false
+                    },
+                )
+                SortOrder.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option.label) },
+                        trailingIcon = {
+                            if (option == order) {
+                                Icon(Icons.Default.Check, contentDescription = null)
+                            }
+                        },
+                        onClick = {
+                            vm.setDetailSort(option)
+                            menuOpen = false
+                        },
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(if (descending) "Descending" else "Ascending") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (descending) Icons.Default.ArrowDownward
+                            else Icons.Default.ArrowUpward,
+                            contentDescription = null,
+                        )
+                    },
+                    // Direction has nothing to reverse while the list is in its default order.
+                    enabled = order != null,
+                    onClick = {
+                        vm.setDetailSortDescending(!descending)
+                        menuOpen = false
+                    },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun AlbumDetailScreen(
@@ -157,6 +270,7 @@ fun PlaylistDetailScreen(
 
     // Recomputed against `library` so songs removed from disk disappear from the playlist view.
     val songs = remember(playlist, library) { vm.songsOf(playlist) }
+    val ordered = sortedForDetail(vm, songs)
 
     Scaffold(
         topBar = {
@@ -182,16 +296,17 @@ fun PlaylistDetailScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item {
                 PlayButtons(
-                    onPlay = { vm.playAll(songs) },
-                    onShuffle = { vm.playShuffled(songs) },
+                    onPlay = { vm.playAll(ordered) },
+                    onShuffle = { vm.playShuffled(ordered) },
                 )
             }
-            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+            item { SongsHeader(vm, ordered.size) }
+            itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
                 SongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(songs, index) },
+                    onClick = { vm.playAll(ordered, index) },
                     onMenuClick = { onSongMenu(song) },
                 )
             }
@@ -215,6 +330,8 @@ fun GenreDetailScreen(
         return
     }
 
+    val ordered = sortedForDetail(vm, genre.songs)
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -230,16 +347,17 @@ fun GenreDetailScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item {
                 PlayButtons(
-                    onPlay = { vm.playAll(genre.songs) },
-                    onShuffle = { vm.playShuffled(genre.songs) },
+                    onPlay = { vm.playAll(ordered) },
+                    onShuffle = { vm.playShuffled(ordered) },
                 )
             }
-            itemsIndexed(genre.songs, key = { _, song -> song.id }) { index, song ->
+            item { SongsHeader(vm, ordered.size) }
+            itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
                 SongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(genre.songs, index) },
+                    onClick = { vm.playAll(ordered, index) },
                     onMenuClick = { onSongMenu(song) },
                 )
             }
@@ -257,6 +375,7 @@ fun FolderDetailScreen(
     val library by vm.library.collectAsState()
     val playerState by vm.playerState.collectAsState()
     val songs = remember(folderPath, library) { vm.songsInFolder(folderPath) }
+    val ordered = sortedForDetail(vm, songs)
 
     Scaffold(
         topBar = {
@@ -292,16 +411,17 @@ fun FolderDetailScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item {
                 PlayButtons(
-                    onPlay = { vm.playAll(songs) },
-                    onShuffle = { vm.playShuffled(songs) },
+                    onPlay = { vm.playAll(ordered) },
+                    onShuffle = { vm.playShuffled(ordered) },
                 )
             }
-            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+            item { SongsHeader(vm, ordered.size) }
+            itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
                 SongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(songs, index) },
+                    onClick = { vm.playAll(ordered, index) },
                     onMenuClick = { onSongMenu(song) },
                 )
             }
@@ -326,6 +446,9 @@ private fun DetailScaffold(
     vm: MainViewModel,
     onSongMenu: (Song) -> Unit,
 ) {
+    val ordered = sortedForDetail(vm, songs)
+    val reordered = vm.detailSort.collectAsState().value != null
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -370,11 +493,16 @@ private fun DetailScaffold(
                 }
             }
 
-            // Only label discs when there's more than one — a single-disc album needs no header.
-            val multiDisc = songs.mapNotNull { it.disc.takeIf { d -> d > 0 } }.distinct().size > 1
+            item { SongsHeader(vm, ordered.size) }
 
-            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
-                if (multiDisc && (index == 0 || songs[index - 1].disc != song.disc)) {
+            // Disc headers only make sense while the list is in disc/track order. Once it is
+            // sorted by, say, title, the tracks no longer arrive grouped by disc and the headers
+            // would appear repeatedly and mean nothing.
+            val multiDisc = !reordered &&
+                songs.mapNotNull { it.disc.takeIf { d -> d > 0 } }.distinct().size > 1
+
+            itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
+                if (multiDisc && (index == 0 || ordered[index - 1].disc != song.disc)) {
                     Text(
                         text = "Disc ${song.disc}",
                         style = MaterialTheme.typography.labelLarge,
@@ -387,9 +515,9 @@ private fun DetailScaffold(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == currentSongId,
-                    onClick = { vm.playAll(songs, index) },
+                    onClick = { vm.playAll(ordered, index) },
                     onMenuClick = { onSongMenu(song) },
-                    trailing = song.track.takeIf { it > 0 }?.toString()
+                    trailing = song.track.takeIf { it > 0 && !reordered }?.toString()
                         ?: formatDuration(song.durationMs),
                 )
             }
