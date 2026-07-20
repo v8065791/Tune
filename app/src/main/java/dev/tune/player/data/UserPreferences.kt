@@ -24,6 +24,9 @@ enum class HomeTab(val label: String) {
     FOLDERS("Folders"),
 }
 
+/** Playback state saved between app launches. */
+data class ResumeState(val queue: List<Long>, val index: Int, val positionMs: Long)
+
 /** How the chosen folder list is applied to the library. */
 enum class FolderMode(val label: String) {
     /** Everything is scanned except the chosen folders and their subfolders. */
@@ -93,6 +96,48 @@ class UserPreferences(private val context: Context) {
         val squareCovers = booleanPreferencesKey("square_covers")
         val roundedCorners = booleanPreferencesKey("rounded_corners")
         val homeTabs = stringPreferencesKey("home_tabs")
+
+        // Favourites and resume state
+        val favourites = stringSetPreferencesKey("favourite_songs")
+        val resumeQueue = stringPreferencesKey("resume_queue")
+        val resumeIndex = stringPreferencesKey("resume_index")
+        val resumePosition = stringPreferencesKey("resume_position")
+    }
+
+    // ---- Favourites --------------------------------------------------------
+
+    val favourites: Flow<Set<Long>> = flow { prefs ->
+        prefs[Keys.favourites].orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+    }
+
+    suspend fun setFavourite(songId: Long, favourite: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.favourites].orEmpty()
+            val id = songId.toString()
+            prefs[Keys.favourites] = if (favourite) current + id else current - id
+        }
+    }
+
+    // ---- Resume state ------------------------------------------------------
+
+    /** The queue as it was when playback last stopped, for [rememberPlayback]. */
+    val resumeState: Flow<ResumeState?> = flow { prefs ->
+        val ids = prefs[Keys.resumeQueue]
+            ?.split(',')
+            ?.mapNotNull { it.toLongOrNull() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: return@flow null
+        ResumeState(
+            queue = ids,
+            index = prefs[Keys.resumeIndex]?.toIntOrNull() ?: 0,
+            positionMs = prefs[Keys.resumePosition]?.toLongOrNull() ?: 0L,
+        )
+    }
+
+    suspend fun saveResumeState(queue: List<Long>, index: Int, positionMs: Long) = edit {
+        it[Keys.resumeQueue] = queue.joinToString(",")
+        it[Keys.resumeIndex] = index.toString()
+        it[Keys.resumePosition] = positionMs.toString()
     }
 
     // ---- Folders & sorting -------------------------------------------------

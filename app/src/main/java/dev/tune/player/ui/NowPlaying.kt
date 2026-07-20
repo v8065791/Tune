@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -16,7 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -29,7 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -131,6 +137,7 @@ fun NowPlayingScreen(
     state: PlayerState,
     onBack: () -> Unit,
     onOpenQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     // While the user drags, show their position rather than the player's, or the thumb fights back.
     var scrubPosition by remember { mutableStateOf<Float?>(null) }
@@ -147,6 +154,23 @@ fun NowPlayingScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Spacer(Modifier.weight(1f))
+            val favourites by vm.favourites.collectAsState()
+            val isFavourite = song.id in favourites
+            IconButton(onClick = { vm.toggleFavourite(song) }) {
+                Icon(
+                    if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isFavourite) "Remove from favourites"
+                    else "Add to favourites",
+                    tint = if (isFavourite) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onAddToPlaylist) {
+                Icon(
+                    Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = "Add to playlist",
+                )
+            }
             IconButton(onClick = onOpenQueue) {
                 Icon(
                     Icons.AutoMirrored.Filled.QueueMusic,
@@ -253,6 +277,37 @@ fun NowPlayingScreen(
                     tint = if (state.repeatMode == Player.REPEAT_MODE_OFF)
                         MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        SpeedControl(speed = state.speed, onSelect = vm::setSpeed)
+    }
+}
+
+/** Playback rate presets. Pitch is preserved, so speech stays intelligible when sped up. */
+@Composable
+private fun SpeedControl(speed: Float, onSelect: (Float) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Speed",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 4.dp),
+        )
+        listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { preset ->
+            val selected = kotlin.math.abs(speed - preset) < 0.01f
+            TextButton(onClick = { onSelect(preset) }, contentPadding = PaddingValues(4.dp)) {
+                Text(
+                    text = if (preset == 1f) "1x" else "${preset}x".replace(".0x", "x"),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

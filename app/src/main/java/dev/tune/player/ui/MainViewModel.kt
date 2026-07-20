@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -175,12 +177,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             preferences.rewindOnPrevious.collect { player.rewindOnPrevious = it }
         }
+
+        // Persist the queue as it changes, so it survives the process being killed.
+        viewModelScope.launch {
+            playerState.collect { state ->
+                if (state.queueIds.isNotEmpty() && preferences.rememberPlayback.first()) {
+                    preferences.saveResumeState(
+                        state.queueIds,
+                        state.queueIndex,
+                        state.positionMs,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Puts back the queue from the last session, paused. Waits for the library so ids can be
+     * resolved, and for the media controller to finish connecting.
+     */
+    private fun restorePlayback() = viewModelScope.launch {
+        if (!preferences.rememberPlayback.first()) return@launch
+        val saved = preferences.resumeState.first() ?: return@launch
+        val songs = library.first { it.songs.isNotEmpty() }.songs.associateBy { it.id }
+        val queue = saved.queue.mapNotNull { songs[it] }
+        if (queue.isEmpty()) return@launch
+
+        // The controller connects asynchronously; retry briefly rather than racing it.
+        repeat(RESTORE_ATTEMPTS) {
+            if (playerState.value.queueSize > 0) return@launch
+            player.restore(queue, saved.index, saved.positionMs)
+            delay(RESTORE_RETRY_MS)
+        }
     }
 
     fun onPermissionGranted() {
         if (_permissionGranted.value) return
         _permissionGranted.value = true
         viewModelScope.launch { repository.initialise() }
+        restorePlayback()
     }
 
     fun refresh() = viewModelScope.launch { repository.refresh() }
@@ -259,6 +294,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun reportMessage(text: String) { _messages.value = text }
 
+    // ---- Favourites & playback rate ----------------------------------------
+
+    val favourites = preferences.favourites.asState(emptySet())
+
+    fun isFavourite(song: Song) = song.id in favourites.value
+
+    fun toggleFavourite(song: Song) =
+        viewModelScope.launch { preferences.setFavourite(song.id, song.id !in favourites.value) }
+
+    fun setSpeed(speed: Float) = player.setSpeed(speed)
+
     // ---- Sorting & metadata ------------------------------------------------
 
     fun setSongSort(order: SortOrder) =
@@ -307,6 +353,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playShuffled(songs: List<Song>) {
         if (songs.isEmpty()) return
         player.play(songs.shuffled())
+    }
+
+    private companion object {
+        const val RESTORE_ATTEMPTS = 10
+        const val RESTORE_RETRY_MS = 300L
     }
 
     override fun onCleared() {

@@ -84,7 +84,13 @@ fun TuneApp(vm: MainViewModel) {
     // The mini player lives above the NavHost rather than inside any one screen, so it stays put
     // while navigating. The now playing screen is the exception — it already shows the controls.
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-    val currentSong = vm.currentSong()
+
+    // Derive from playerState here, in this composable's own scope. Calling vm.currentSong()
+    // reads StateFlow.value without subscribing, so the bar only appeared once something else
+    // forced a recomposition — such as navigating to another screen.
+    val currentSong = remember(playerState.currentSongId, library) {
+        library.songs.firstOrNull { it.id == playerState.currentSongId }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -158,6 +164,7 @@ fun TuneApp(vm: MainViewModel) {
                 state = playerState,
                 onBack = { navController.popBackStack() },
                 onOpenQueue = { navController.navigate(Routes.QUEUE) },
+                onAddToPlaylist = { playlistPickerFor = song },
             )
         }
 

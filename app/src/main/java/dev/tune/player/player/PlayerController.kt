@@ -30,6 +30,7 @@ data class PlayerState(
     val queueIndex: Int = 0,
     /** Song ids in queue order, so the queue screen can resolve them against the library. */
     val queueIds: List<Long> = emptyList(),
+    val speed: Float = 1f,
 )
 
 /**
@@ -132,6 +133,7 @@ class PlayerController(private val context: Context, private val scope: Coroutin
             queueIds = (0 until player.mediaItemCount).mapNotNull {
                 player.getMediaItemAt(it).mediaId.toLongOrNull()
             },
+            speed = player.playbackParameters.speed,
         )
     }
 
@@ -148,6 +150,24 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         val player = controller ?: return
         if (index !in 0 until player.mediaItemCount) return
         player.removeMediaItem(index)
+        syncState()
+    }
+
+    /** Playback rate, 1.0 being normal. Pitch is left untouched. */
+    fun setSpeed(speed: Float) {
+        controller?.setPlaybackSpeed(speed.coerceIn(MIN_SPEED, MAX_SPEED))
+        syncState()
+    }
+
+    /**
+     * Restores a saved queue without starting playback — the user should come back to a paused
+     * player, not have music start on its own.
+     */
+    fun restore(songs: List<Song>, index: Int, positionMs: Long) {
+        val player = controller ?: return
+        if (songs.isEmpty() || player.mediaItemCount > 0) return
+        player.setMediaItems(songs.map(::toMediaItem), index.coerceIn(songs.indices), positionMs)
+        player.prepare()
         syncState()
     }
 
@@ -186,6 +206,8 @@ class PlayerController(private val context: Context, private val scope: Coroutin
     private companion object {
         const val POSITION_POLL_MS = 500L
         const val RESTART_THRESHOLD_MS = 3_000L
+        const val MIN_SPEED = 0.25f
+        const val MAX_SPEED = 3.0f
         val ALBUM_ART_BASE: Uri = Uri.parse("content://media/external/audio/albumart")
     }
 }
