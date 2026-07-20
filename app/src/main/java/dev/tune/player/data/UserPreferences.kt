@@ -24,6 +24,15 @@ enum class HomeTab(val label: String) {
     FOLDERS("Folders"),
 }
 
+/** How the chosen folder list is applied to the library. */
+enum class FolderMode(val label: String) {
+    /** Everything is scanned except the chosen folders and their subfolders. */
+    EXCLUDE("Exclude selected"),
+
+    /** Only the chosen folders and their subfolders are scanned. */
+    INCLUDE("Include only selected"),
+}
+
 /** App theme, independent of the "black" (AMOLED) toggle. */
 enum class ThemeMode(val label: String) {
     SYSTEM("Follow system"),
@@ -60,6 +69,7 @@ class UserPreferences(private val context: Context) {
 
     private object Keys {
         val excludedFolders = stringSetPreferencesKey("excluded_folders")
+        val folderMode = stringPreferencesKey("folder_mode")
         val songSort = stringPreferencesKey("song_sort")
 
         // Library
@@ -105,6 +115,17 @@ class UserPreferences(private val context: Context) {
         edit { it[Keys.excludedFolders] = paths }
 
     suspend fun setSongSort(order: SortOrder) = edit { it[Keys.songSort] = order.name }
+
+    /**
+     * Whether the stored folder list is a deny-list or an allow-list. Defaults to excluding, so a
+     * fresh install scans everything.
+     */
+    val folderMode: Flow<FolderMode> = flow { prefs ->
+        prefs[Keys.folderMode]?.let { n -> FolderMode.entries.firstOrNull { it.name == n } }
+            ?: FolderMode.EXCLUDE
+    }
+
+    suspend fun setFolderMode(mode: FolderMode) = edit { it[Keys.folderMode] = mode.name }
 
     // ---- Library -----------------------------------------------------------
 

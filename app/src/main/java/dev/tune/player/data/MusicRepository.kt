@@ -49,7 +49,8 @@ class MusicRepository(private val context: Context) {
 
     /** The library-shaping settings, bundled so [combine] stays within its arity limits. */
     private data class LibraryOptions(
-        val excludedFolders: Set<String>,
+        val folders: Set<String>,
+        val folderMode: FolderMode,
         val sort: SortOrder,
         val separators: String,
         val autoSortNames: Boolean,
@@ -57,15 +58,19 @@ class MusicRepository(private val context: Context) {
     )
 
     init {
+        val folderOptions =
+            combine(preferences.excludedFolders, preferences.folderMode, ::Pair)
+
         val options =
             combine(
-                preferences.excludedFolders,
+                folderOptions,
                 preferences.songSort,
                 preferences.separators,
                 preferences.autoSortNames,
                 preferences.hideCollaborators,
-                ::LibraryOptions,
-            )
+            ) { (folders, mode), sort, separators, autoSort, hideCollabs ->
+                LibraryOptions(folders, mode, sort, separators, autoSort, hideCollabs)
+            }
 
         scope.launch {
             combine(allSongs, options, ::buildLibrary).collect { _library.value = it }
@@ -153,15 +158,17 @@ class MusicRepository(private val context: Context) {
 
     private suspend fun buildLibrary(songs: List<Song>, options: LibraryOptions): Library =
         withContext(Dispatchers.Default) {
-        val excludedFolders = options.excludedFolders
         val sort = options.sort
         val collator = NameCollator(options.autoSortNames)
-        // A folder is excluded if it or any ancestor was unchecked, so unchecking a parent
-        // hides the whole subtree the way the picker's nesting implies.
-        val visible = songs.filterNot { song ->
-            excludedFolders.any { excluded ->
-                song.folderPath == excluded || song.folderPath.startsWith("$excluded/")
-            }
+        // Selecting a directory always covers its subfolders, so picking one top-level folder
+        // is enough — matching how a directory picker is normally understood.
+        fun Song.isUnder(dir: String) = folderPath == dir || folderPath.startsWith("$dir/")
+
+        val visible = when {
+            options.folders.isEmpty() -> songs
+            options.folderMode == FolderMode.INCLUDE ->
+                songs.filter { song -> options.folders.any(song::isUnder) }
+            else -> songs.filterNot { song -> options.folders.any(song::isUnder) }
         }
 
         val albums = visible.groupBy { it.albumId }

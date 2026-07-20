@@ -57,6 +57,9 @@ fun SongsTab(
         EmptyState("No songs found.\nCheck your folder selection in Settings.", modifier)
         return
     }
+    val selection by vm.selection.collectAsState()
+    val selecting = selection.isNotEmpty()
+
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = ListBottomPadding) {
         // Keyed by song id so scroll position survives a re-sort.
         itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
@@ -64,8 +67,12 @@ fun SongsTab(
                 song = song,
                 art = vm.artForSong(song),
                 highlighted = song.id == currentSongId,
-                onClick = { vm.playAll(songs, index) },
-                onMenuClick = { onSongMenu(song) },
+                // While selecting, a tap toggles instead of playing.
+                onClick = { if (selecting) vm.toggleSelection(song) else vm.playAll(songs, index) },
+                onMenuClick = { if (selecting) vm.toggleSelection(song) else onSongMenu(song) },
+                selected = if (selecting) song.id in selection else null,
+                // Long-press begins a bulk selection.
+                onLongClick = { vm.toggleSelection(song) },
             )
         }
     }

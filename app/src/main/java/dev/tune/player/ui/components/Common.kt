@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,16 +98,27 @@ fun SongRow(
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier,
     trailing: String = formatDuration(song.durationMs),
+    /** Non-null puts the row in selection mode, replacing artwork with a checkbox. */
+    selected: Boolean? = null,
+    /** Long-press action. Defaults to the overflow menu when no bulk selection is offered. */
+    onLongClick: () -> Unit = onMenuClick,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // Long-press anywhere on the row opens the same menu as the overflow button.
-            .combinedClickable(onClick = onClick, onLongClick = onMenuClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(
+                if (selected == true) MaterialTheme.colorScheme.primaryContainer
+                else Color.Transparent
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Artwork(art = art, modifier = Modifier.size(48.dp))
+        if (selected != null) {
+            Checkbox(checked = selected, onCheckedChange = null, modifier = Modifier.size(48.dp))
+        } else {
+            Artwork(art = art, modifier = Modifier.size(48.dp))
+        }
 
         Column(
             modifier = Modifier

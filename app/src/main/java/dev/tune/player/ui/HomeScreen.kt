@@ -7,8 +7,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -47,6 +52,46 @@ import dev.tune.player.ui.tabs.PlaylistsTab
 import dev.tune.player.ui.tabs.SongsTab
 import kotlinx.coroutines.launch
 
+/** Contextual toolbar shown in place of the normal one while songs are selected. */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    onClear: () -> Unit,
+    onSelectAll: () -> Unit,
+    onPlay: () -> Unit,
+    onQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
+    TopAppBar(
+        title = { Text("$count selected") },
+        navigationIcon = {
+            IconButton(onClick = onClear) {
+                Icon(Icons.Default.Close, contentDescription = "Clear selection")
+            }
+        },
+        actions = {
+            IconButton(onClick = onPlay) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play selection")
+            }
+            IconButton(onClick = onQueue) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = "Add selection to queue",
+                )
+            }
+            IconButton(onClick = onAddToPlaylist) {
+                Icon(
+                    Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = "Add selection to playlist",
+                )
+            }
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Default.SelectAll, contentDescription = "Select all")
+            }
+        },
+    )
+}
+
 @Composable
 fun HomeScreen(
     vm: MainViewModel,
@@ -60,6 +105,7 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onCreatePlaylist: () -> Unit,
     onExpandPlayer: () -> Unit,
+    onSelectionToPlaylist: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
     val playlists by vm.playlists.collectAsState()
@@ -78,9 +124,18 @@ fun HomeScreen(
     }
     val currentTab = tabs.getOrNull(pagerState.currentPage)
 
+    val selection by vm.selection.collectAsState()
+
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selection.isNotEmpty()) SelectionBar(
+                count = selection.size,
+                onClear = { vm.clearSelection() },
+                onSelectAll = { vm.selectAll(library.songs) },
+                onPlay = { vm.playSelection(library.songs) },
+                onQueue = { vm.queueSelection(library.songs) },
+                onAddToPlaylist = onSelectionToPlaylist,
+            ) else TopAppBar(
                 title = { Text("Tune") },
                 actions = {
                     IconButton(onClick = onOpenSearch) {

@@ -73,6 +73,8 @@ fun TuneApp(vm: MainViewModel) {
     var playlistPickerFor by remember { mutableStateOf<Song?>(null) }
     var newPlaylistForSong by remember { mutableStateOf<Song?>(null) }
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
+    var playlistPickerForSelection by remember { mutableStateOf(false) }
+    val library by vm.library.collectAsState()
 
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
@@ -88,6 +90,7 @@ fun TuneApp(vm: MainViewModel) {
                 onOpenSearch = { navController.navigate(Routes.SEARCH) },
                 onCreatePlaylist = { showNewPlaylistDialog = true },
                 onExpandPlayer = { navController.navigate(Routes.NOW_PLAYING) },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
             )
         }
 
@@ -224,6 +227,22 @@ fun TuneApp(vm: MainViewModel) {
             onCreateNew = {
                 newPlaylistForSong = song
                 playlistPickerFor = null
+            },
+        )
+    }
+
+    if (playlistPickerForSelection) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onDismiss = { playlistPickerForSelection = false },
+            onPick = { playlistId ->
+                vm.addSelectionToPlaylist(playlistId, library.songs)
+                playlistPickerForSelection = false
+            },
+            onCreateNew = {
+                // Creating from a selection isn't wired up yet; fall back to an empty playlist.
+                playlistPickerForSelection = false
+                showNewPlaylistDialog = true
             },
         )
     }

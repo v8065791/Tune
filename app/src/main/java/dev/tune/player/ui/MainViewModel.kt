@@ -10,6 +10,7 @@ import dev.tune.player.data.Album
 import dev.tune.player.data.Artist
 import dev.tune.player.data.CoverMode
 import dev.tune.player.data.Folder
+import dev.tune.player.data.FolderMode
 import dev.tune.player.data.Genre
 import dev.tune.player.data.HomeTab
 import dev.tune.player.data.PlayInMode
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -85,6 +87,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Runs a preference write off the UI thread; every settings toggle funnels through here. */
     fun edit(block: suspend UserPreferences.() -> Unit) =
         viewModelScope.launch { preferences.block() }
+
+    // ---- Selection ---------------------------------------------------------
+
+    /** Ids of songs picked in selection mode. Empty means selection mode is off. */
+    private val _selection = MutableStateFlow<Set<Long>>(emptySet())
+    val selection: StateFlow<Set<Long>> = _selection.asStateFlow()
+
+    val inSelectionMode: StateFlow<Boolean> =
+        _selection.map { it.isNotEmpty() }.asState(false)
+
+    fun toggleSelection(song: Song) {
+        val current = _selection.value
+        _selection.value =
+            if (song.id in current) current - song.id else current + song.id
+    }
+
+    fun selectAll(songs: List<Song>) {
+        _selection.value = songs.map { it.id }.toSet()
+    }
+
+    fun clearSelection() { _selection.value = emptySet() }
+
+    /** Resolves the selection back to songs, in the order they appear in [from]. */
+    private fun selectedSongs(from: List<Song>): List<Song> {
+        val ids = _selection.value
+        return from.filter { it.id in ids }
+    }
+
+    fun playSelection(from: List<Song>) {
+        val songs = selectedSongs(from)
+        if (songs.isNotEmpty()) player.play(songs)
+        clearSelection()
+    }
+
+    fun queueSelection(from: List<Song>) {
+        val songs = selectedSongs(from)
+        if (songs.isNotEmpty()) player.addToQueue(songs)
+        clearSelection()
+    }
+
+    fun addSelectionToPlaylist(playlistId: String, from: List<Song>) {
+        val songs = selectedSongs(from)
+        if (songs.isNotEmpty()) addToPlaylist(playlistId, songs.map { it.id })
+        clearSelection()
+    }
 
     // ---- Search ------------------------------------------------------------
 
@@ -197,11 +244,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Folders -----------------------------------------------------------
 
-    fun setFolderExcluded(folder: Folder, excluded: Boolean) =
-        viewModelScope.launch { repository.toggleFolder(folder.path, excluded) }
+    val folderMode = preferences.folderMode.asState(FolderMode.EXCLUDE)
 
-    fun includeAllFolders() =
+    fun setFolderMode(mode: FolderMode) = edit { setFolderMode(mode) }
+
+    fun addFolder(path: String) =
+        viewModelScope.launch { repository.preferences.setFolderExcluded(path, true) }
+
+    fun removeFolder(path: String) =
+        viewModelScope.launch { repository.preferences.setFolderExcluded(path, false) }
+
+    fun clearFolders() =
         viewModelScope.launch { repository.preferences.setExcludedFolders(emptySet()) }
+
+    fun reportMessage(text: String) { _messages.value = text }
 
     // ---- Sorting & metadata ------------------------------------------------
 
