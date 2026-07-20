@@ -30,6 +30,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -104,8 +105,20 @@ private fun SongsHeader(vm: MainViewModel, count: Int) {
             text = "Songs",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
         )
+        // An active sort also hides disc headers and track numbers, which reads as missing data
+        // unless something says why. The sort persists across screens, so it is easy to forget
+        // one is on at all.
+        if (order != null) {
+            Text(
+                text = "  ${order?.label}${if (descending) " ↓" else " ↑"}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.weight(1f))
         Text(
             text = "$count",
             style = MaterialTheme.typography.labelMedium,
@@ -113,7 +126,12 @@ private fun SongsHeader(vm: MainViewModel, count: Int) {
         )
         Box {
             IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort songs")
+                Icon(
+                    Icons.AutoMirrored.Filled.Sort,
+                    contentDescription = "Sort songs",
+                    tint = if (order != null) MaterialTheme.colorScheme.primary
+                    else LocalContentColor.current,
+                )
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(

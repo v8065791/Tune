@@ -92,7 +92,10 @@ object MediaScanner {
         fun readSong(): Song? {
             val path = cursor.getStringOrNull(data) ?: return null
             val songId = cursor.getLong(id)
-            val rawTrack = cursor.getIntOrNull(track) ?: 0
+            val position = decodeTrackAndDisc(
+                rawTrack = cursor.getIntOrNull(track) ?: 0,
+                rawDisc = cursor.getIntOrNull(disc),
+            )
 
             return Song(
                 id = songId,
@@ -104,9 +107,8 @@ object MediaScanner {
                 albumArtist = cursor.getStringOrNull(albumArtist),
                 composer = cursor.getStringOrNull(composer),
                 genre = cursor.getStringOrNull(genre),
-                // MediaStore encodes multi-disc track numbers as DTTT (disc 2 track 5 -> 2005).
-                track = if (rawTrack > 1000) rawTrack % 1000 else rawTrack,
-                disc = cursor.getIntOrNull(disc) ?: if (rawTrack > 1000) rawTrack / 1000 else 0,
+                track = position.track,
+                disc = position.disc,
                 year = cursor.getIntOrNull(year) ?: 0,
                 durationMs = cursor.getLongOrNull(duration) ?: 0L,
                 sizeBytes = cursor.getLongOrNull(size) ?: 0L,
@@ -128,4 +130,27 @@ object MediaScanner {
     }
 
     private const val UNKNOWN = "<unknown>"
+}
+
+/** Where a song sits on its release. Zero means "the tags didn't say", not "the first one". */
+data class TrackPosition(val track: Int, val disc: Int)
+
+/**
+ * Decodes MediaStore's track and disc columns.
+ *
+ * `TRACK` packs multi-disc releases as DTTT — disc 2 track 5 arrives as 2005. `DISC_NUMBER` is the
+ * newer, explicit column, but it only exists on API 30+ and devices disagree on how they report an
+ * absent value: some give null, others 0. Both are treated as "not told", so the DTTT fallback
+ * still runs instead of a missing disc silently becoming disc 0.
+ *
+ * That disagreement is the reason this is a free function rather than inline in the cursor loop —
+ * it is the one piece of scanning that can be tested without a device.
+ */
+internal fun decodeTrackAndDisc(rawTrack: Int, rawDisc: Int?): TrackPosition {
+    // >= rather than >: a bare 1000 is disc 1 track 0, which the old > let through as track 1000.
+    val packed = rawTrack >= 1000
+    return TrackPosition(
+        track = if (packed) rawTrack % 1000 else rawTrack,
+        disc = rawDisc?.takeIf { it > 0 } ?: if (packed) rawTrack / 1000 else 0,
+    )
 }

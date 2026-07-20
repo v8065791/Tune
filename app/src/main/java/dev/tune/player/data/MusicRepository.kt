@@ -36,6 +36,7 @@ class MusicRepository(private val context: Context) {
     val playlists = PlaylistStore(context)
     val playStats = PlayStatsStore(context)
     val genres = GenreStore(context)
+    private val releaseDates = ReleaseDateStore(context)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
 
@@ -131,6 +132,7 @@ class MusicRepository(private val context: Context) {
         playlists.load()
         playStats.load()
         genres.load()
+        releaseDates.load()
         refresh()
     }
 
@@ -138,7 +140,8 @@ class MusicRepository(private val context: Context) {
     suspend fun refresh() {
         _isScanning.value = true
         try {
-            val songs = MediaScanner.scan(context)
+            // MediaStore only reports a year, so full dates are read from the tags and cached.
+            val songs = releaseDates.enrich(MediaScanner.scan(context))
             allSongs.value = songs
             _allFolders.value = songs.groupingBy { it.folderPath }
                 .eachCount()
@@ -378,11 +381,11 @@ fun SortOrder.comparator(
         SortOrder.ALBUM -> compareBy({ it.album.lowercase() }, { it.disc }, { it.track })
         SortOrder.ARTIST_YEAR ->
             collator.comparingBy<Song> { it.artist }
-                .thenBy { it.year }
+                .thenBy { it.releaseDateKey }
                 .thenBy { it.album.lowercase() }
                 .thenBy { it.disc }
                 .thenBy { it.track }
-        SortOrder.YEAR -> compareBy<Song> { it.year }.thenBy { it.title.lowercase() }
+        SortOrder.YEAR -> compareBy<Song> { it.releaseDateKey }.thenBy { it.title.lowercase() }
         SortOrder.DURATION -> compareBy { it.durationMs }
         SortOrder.DATE_ADDED -> compareBy { it.dateAddedSeconds }
         SortOrder.MOST_PLAYED -> compareBy { stats[it.id]?.count ?: 0 }

@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.tune.player.art.ArtRequest
+import dev.tune.player.data.PackedDate
 import dev.tune.player.data.Song
 import dev.tune.player.ui.components.Artwork
 import dev.tune.player.ui.components.formatDuration
@@ -70,7 +71,12 @@ fun MetadataSheet(song: Song, art: ArtRequest, onDismiss: () -> Unit) {
             MetadataRow("Album artist", song.albumArtist)
             MetadataRow("Composer", song.composer)
             MetadataRow("Genre", song.genre)
-            MetadataRow("Year", song.year.takeIf { it > 0 }?.toString())
+            // Shows the full tagged date when there is one, so it's visible why two songs from
+            // the same year sort the way they do.
+            MetadataRow(
+                "Release date",
+                PackedDate.format(song.releaseDate) ?: song.year.takeIf { it > 0 }?.toString(),
+            )
             MetadataRow("Track", song.track.takeIf { it > 0 }?.toString())
             MetadataRow("Disc", song.disc.takeIf { it > 0 }?.toString())
             MetadataRow("Duration", formatDuration(song.durationMs))

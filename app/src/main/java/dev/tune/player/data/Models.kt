@@ -22,6 +22,12 @@ data class Song(
     val track: Int,
     val disc: Int,
     val year: Int,
+    /**
+     * Full release date packed as `yyyymmdd`, or 0 when the tags gave nothing better than [year].
+     * See [ReleaseDateReader] — this exists because MediaStore only reports a year, which makes a
+     * single-year library unsortable by date.
+     */
+    val releaseDate: Int = 0,
     val durationMs: Long,
     val sizeBytes: Long,
     val mimeType: String,
@@ -39,6 +45,15 @@ data class Song(
      */
     val uri: Uri
         get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+
+    /**
+     * What "release date" sorts on: the tagged date when there is one, otherwise the year padded
+     * out to `yyyy0000`. Padding rather than comparing years separately is what lets a year-only
+     * file sort ahead of every dated file in the same year, which is the honest answer — it could
+     * be any day of it.
+     */
+    val releaseDateKey: Int
+        get() = if (releaseDate > 0) releaseDate else PackedDate.ofYear(year)
 }
 
 data class Album(
@@ -50,6 +65,9 @@ data class Album(
     val songs: List<Song>,
 ) {
     val durationMs: Long get() = songs.sumOf { it.durationMs }
+
+    /** Newest track date on the album — derived rather than stored, so it can't drift from [songs]. */
+    val releaseDateKey: Int get() = songs.maxOfOrNull { it.releaseDateKey } ?: 0
 }
 
 data class Artist(

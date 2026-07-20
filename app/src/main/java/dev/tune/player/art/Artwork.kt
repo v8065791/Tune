@@ -75,9 +75,12 @@ class ArtFetcher(
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
 
-        val target = TARGET_PX
+        // Compare the *longest* side: with `&&` a wide cover stopped subsampling as soon as its
+        // short side fit, so a 3000x500 image decoded at full width. Matches the notification
+        // loader's calculation — these two must agree or one of them is wrong.
         var sample = 1
-        while (bounds.outHeight / sample > target && bounds.outWidth / sample > target) {
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (longest / sample > TARGET_PX) {
             sample *= 2
         }
 

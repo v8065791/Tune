@@ -143,6 +143,10 @@ Worth reading before changing anything:
 - **Artists group by album artist**, not track artist — grouping by track artist turned a 2-artist
   library into 43 entries. Identity is a hash of the normalised name, since MediaStore has no
   `ALBUM_ARTIST_ID`, and it must stay stable because artwork overrides key off it.
+- **MediaStore's `YEAR` is only a year.** A library recorded inside one year therefore ties on
+  every date comparison and the sort falls through to its tiebreaker, looking broken. Full dates
+  are read from the tags instead (`ReleaseDateStore`), packed as `yyyymmdd` and cached by mtime.
+  Sort on `Song.releaseDateKey`, never on `year`.
 - **`Song.uri` is computed from `id`, not stored**, which keeps `Song` constructible without
   Android present. That is what makes the sorting and duplicate logic unit-testable.
 - **R8 needs explicit keep rules for serializers** (`proguard-rules.pro`). A missing rule shows up
@@ -174,8 +178,8 @@ minute of actually using the app.
 
 ## Known limitations
 
-- **No M4A/ALAC ReplayGain** — iTunes `----` atoms aren't parsed. Those files get no gain rather
-  than a wrong one.
+- **No M4A/ALAC tag reading** — iTunes `----` atoms aren't parsed, so those files get no ReplayGain
+  and no full release date (they fall back to MediaStore's year) rather than a wrong one.
 - **No ID3v2.2** — three-character frame ids, effectively extinct.
 - **ReplayGain only attenuates** unless a peak tag is present, since boosting past `1/peak` would
   clip and there is no limiter in the chain.

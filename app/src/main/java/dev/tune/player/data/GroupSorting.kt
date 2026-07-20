@@ -27,9 +27,9 @@ fun GroupSortOrder.albumComparator(
             collator.comparingBy<Album> { it.artist }.thenBy { it.name.lowercase() }
         GroupSortOrder.ARTIST_YEAR ->
             collator.comparingBy<Album> { it.artist }
-                .thenBy { it.year }
+                .thenBy { it.releaseDateKey }
                 .thenBy { it.name.lowercase() }
-        GroupSortOrder.YEAR -> compareBy<Album> { it.year }.thenBy { it.name.lowercase() }
+        GroupSortOrder.YEAR -> compareBy<Album> { it.releaseDateKey }.thenBy { it.name.lowercase() }
         GroupSortOrder.TRACK_COUNT -> compareBy { it.songs.size }
         GroupSortOrder.MOST_PLAYED -> compareBy { stats.totalPlays(it.songs) }
         GroupSortOrder.RECENTLY_PLAYED -> compareBy { stats.lastPlayed(it.songs) }
