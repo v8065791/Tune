@@ -173,16 +173,6 @@ fun HomeScreen(
                 },
             )
         },
-        bottomBar = {
-            currentSong?.let { song ->
-                MiniPlayer(
-                    song = song,
-                    vm = vm,
-                    state = playerState,
-                    onExpand = onExpandPlayer,
-                )
-            }
-        },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (isScanning) {

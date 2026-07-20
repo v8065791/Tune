@@ -424,7 +424,7 @@ private fun ArtworkSourceToggle(
             onClick = onUseCustom,
             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
         ) {
-            Text(if (hasCustomArt) "Custom — change" else "Custom")
+            Text("Custom")
         }
     }
 }

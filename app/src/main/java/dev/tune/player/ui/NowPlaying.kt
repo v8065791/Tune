@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,7 +56,13 @@ fun MiniPlayer(
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            // The app draws edge to edge, so pad past the gesture/navigation bar — without this
+            // the controls sit underneath it and can't be tapped.
+            .navigationBarsPadding()
+    ) {
         // Thin progress line — cheaper to read at a glance than a full slider.
         val progress = if (state.durationMs > 0) {
             (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
@@ -77,35 +85,39 @@ fun MiniPlayer(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onExpand)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Artwork(art = vm.artForSong(song), modifier = Modifier.size(44.dp))
+            Artwork(art = vm.artForSong(song), modifier = Modifier.size(56.dp))
             Column(
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             ) {
                 Text(
                     song.title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     song.artist,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = { vm.player.togglePlayPause() }) {
+            IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Previous")
+            }
+            IconButton(onClick = { vm.player.togglePlayPause() }, modifier = Modifier.size(52.dp)) {
                 Icon(
                     if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (state.isPlaying) "Pause" else "Play",
+                    modifier = Modifier.size(34.dp),
                 )
             }
-            IconButton(onClick = { vm.player.next() }) {
+            IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Default.SkipNext, contentDescription = "Next")
             }
         }
@@ -118,6 +130,7 @@ fun NowPlayingScreen(
     vm: MainViewModel,
     state: PlayerState,
     onBack: () -> Unit,
+    onOpenQueue: () -> Unit,
 ) {
     // While the user drags, show their position rather than the player's, or the thumb fights back.
     var scrubPosition by remember { mutableStateOf<Float?>(null) }
@@ -134,6 +147,12 @@ fun NowPlayingScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = onOpenQueue) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = "Queue (${state.queueSize} tracks)",
+                )
+            }
             IconButton(onClick = { vm.showMetadata(song) }) {
                 Icon(Icons.Default.Info, contentDescription = "Track metadata")
             }

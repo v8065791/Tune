@@ -2,6 +2,8 @@ package dev.tune.player.ui
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -13,9 +15,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
@@ -36,6 +40,7 @@ private object Routes {
     const val SEARCH = "search"
     const val FOLDER_SETTINGS = "folder_settings"
     const val HOME_TABS = "home_tabs"
+    const val QUEUE = "queue"
     const val ALBUM = "album/{albumId}"
     const val ARTIST = "artist/{artistId}"
     const val GENRE = "genre/{genreId}"
@@ -76,7 +81,17 @@ fun TuneApp(vm: MainViewModel) {
     var playlistPickerForSelection by remember { mutableStateOf(false) }
     val library by vm.library.collectAsState()
 
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+    // The mini player lives above the NavHost rather than inside any one screen, so it stays put
+    // while navigating. The now playing screen is the exception — it already shows the controls.
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    val currentSong = vm.currentSong()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = Routes.HOME,
+            modifier = Modifier.weight(1f),
+        ) {
         composable(Routes.HOME) {
             HomeScreen(
                 vm = vm,
@@ -101,6 +116,10 @@ fun TuneApp(vm: MainViewModel) {
                 onOpenFolders = { navController.navigate(Routes.FOLDER_SETTINGS) },
                 onOpenHomeTabs = { navController.navigate(Routes.HOME_TABS) },
             )
+        }
+
+        composable(Routes.QUEUE) {
+            QueueScreen(vm = vm, onBack = { navController.popBackStack() })
         }
 
         composable(Routes.HOME_TABS) {
@@ -138,6 +157,7 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 state = playerState,
                 onBack = { navController.popBackStack() },
+                onOpenQueue = { navController.navigate(Routes.QUEUE) },
             )
         }
 
@@ -190,6 +210,16 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+            )
+        }
+        }
+
+        if (currentSong != null && currentRoute != Routes.NOW_PLAYING) {
+            MiniPlayer(
+                song = currentSong,
+                vm = vm,
+                state = playerState,
+                onExpand = { navController.navigate(Routes.NOW_PLAYING) },
             )
         }
     }

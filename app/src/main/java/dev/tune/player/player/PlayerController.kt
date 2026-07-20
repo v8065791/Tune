@@ -28,6 +28,8 @@ data class PlayerState(
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val queueSize: Int = 0,
     val queueIndex: Int = 0,
+    /** Song ids in queue order, so the queue screen can resolve them against the library. */
+    val queueIds: List<Long> = emptyList(),
 )
 
 /**
@@ -127,7 +129,34 @@ class PlayerController(private val context: Context, private val scope: Coroutin
             repeatMode = player.repeatMode,
             queueSize = player.mediaItemCount,
             queueIndex = player.currentMediaItemIndex,
+            queueIds = (0 until player.mediaItemCount).mapNotNull {
+                player.getMediaItemAt(it).mediaId.toLongOrNull()
+            },
         )
+    }
+
+    /** Moves a queue entry, e.g. dragging a track earlier. */
+    fun moveQueueItem(from: Int, to: Int) {
+        val player = controller ?: return
+        if (from !in 0 until player.mediaItemCount) return
+        if (to !in 0 until player.mediaItemCount) return
+        player.moveMediaItem(from, to)
+        syncState()
+    }
+
+    fun removeQueueItem(index: Int) {
+        val player = controller ?: return
+        if (index !in 0 until player.mediaItemCount) return
+        player.removeMediaItem(index)
+        syncState()
+    }
+
+    /** Jumps straight to a queue entry without rebuilding the queue. */
+    fun playQueueItem(index: Int) {
+        val player = controller ?: return
+        if (index !in 0 until player.mediaItemCount) return
+        player.seekTo(index, 0L)
+        player.play()
     }
 
     private fun toMediaItem(song: Song): MediaItem =
