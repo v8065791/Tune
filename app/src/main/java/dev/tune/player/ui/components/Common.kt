@@ -155,6 +155,49 @@ fun SongRow(
     }
 }
 
+/**
+ * A compact row for any group — album, artist, genre, playlist, folder — used when the tab is in
+ * list mode. [GridCard] is the same content laid out as a card.
+ */
+@Composable
+fun ListCard(
+    art: ArtRequest,
+    title: String,
+    subtitle: String,
+    rounded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Artwork(art = art, rounded = rounded, modifier = Modifier.size(48.dp))
+        Column(
+            modifier = Modifier.weight(1f).padding(start = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 /** Square artwork card used by the album and artist grids. */
 @Composable
 fun GridCard(
@@ -164,18 +207,34 @@ fun GridCard(
     rounded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    /** Non-null puts the card in selection mode, overlaying a tick. */
+    selected: Boolean? = null,
 ) {
     Column(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(
+                if (selected == true) MaterialTheme.colorScheme.primaryContainer
+                else Color.Transparent
+            )
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Artwork(
-            art = art,
-            rounded = rounded,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-        )
+        Box {
+            Artwork(
+                art = art,
+                rounded = rounded,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+            )
+            if (selected != null) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = null,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                )
+            }
+        }
         Text(
             text = title,
             style = MaterialTheme.typography.bodyMedium,

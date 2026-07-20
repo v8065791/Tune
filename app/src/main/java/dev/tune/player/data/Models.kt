@@ -84,23 +84,32 @@ data class Library(
     val isEmpty: Boolean get() = songs.isEmpty()
 }
 
-/** How a list of songs is ordered in the UI. */
+/**
+ * How a list of songs is ordered in the UI.
+ *
+ * Every comparator is defined ascending, with direction applied separately, so the arrow shown in
+ * the sort menu always tells the truth. That is why these are named for what they sort by rather
+ * than for a direction — "Play count", not "Most played".
+ */
 enum class SortOrder(val label: String) {
     TITLE("Title"),
     ARTIST("Artist"),
     ALBUM("Album"),
-    YEAR("Year"),
+    ARTIST_YEAR("Artist, then release date"),
+    YEAR("Release date"),
     DURATION("Duration"),
     DATE_ADDED("Date added"),
-    MOST_PLAYED("Most played"),
-    RECENTLY_PLAYED("Recently played"),
+    MOST_PLAYED("Play count"),
+    RECENTLY_PLAYED("Last played"),
 }
 
-/** Sort orders for the album, artist and genre grids. */
+/** Sort orders for the album, artist, genre, playlist and folder tabs. */
 enum class GroupSortOrder(val label: String) {
     NAME("Name"),
-    YEAR("Year"),
+    ARTIST("Artist"),
+    ARTIST_YEAR("Artist, then release date"),
+    YEAR("Release date"),
     TRACK_COUNT("Track count"),
-    MOST_PLAYED("Most played"),
-    RECENTLY_PLAYED("Recently played"),
+    MOST_PLAYED("Play count"),
+    RECENTLY_PLAYED("Last played"),
 }

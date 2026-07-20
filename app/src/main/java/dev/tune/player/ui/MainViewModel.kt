@@ -10,11 +10,24 @@ import dev.tune.player.data.AccentColour
 import dev.tune.player.data.Album
 import dev.tune.player.data.Artist
 import dev.tune.player.data.CoverMode
+import dev.tune.player.data.DuplicateGroup
 import dev.tune.player.data.Folder
 import dev.tune.player.data.FolderMode
 import dev.tune.player.data.Genre
+import dev.tune.player.data.GroupSortOrder
 import dev.tune.player.data.HomeTab
+import dev.tune.player.data.NameCollator
 import dev.tune.player.data.PlayInMode
+import dev.tune.player.data.PlayStat
+import dev.tune.player.data.ReplayGainMode
+import dev.tune.player.data.ReplayGainReader
+import dev.tune.player.data.albumComparator
+import dev.tune.player.data.artistComparator
+import dev.tune.player.data.findDuplicates
+import dev.tune.player.data.folderComparator
+import dev.tune.player.data.gainToVolume
+import dev.tune.player.data.genreComparator
+import dev.tune.player.data.playlistComparator
 import dev.tune.player.data.totalPlays
 import dev.tune.player.data.Playlist
 import dev.tune.player.data.Song
@@ -22,7 +35,11 @@ import dev.tune.player.data.SortOrder
 import dev.tune.player.data.ThemeMode
 import dev.tune.player.data.UserPreferences
 import dev.tune.player.player.PlayerController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +81,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val songSort: StateFlow<SortOrder> = repository.preferences.songSort
         .stateIn(viewModelScope, SharingStarted.Eagerly, SortOrder.TITLE)
 
+    val groupSort: StateFlow<GroupSortOrder> = repository.preferences.groupSort
+        .stateIn(viewModelScope, SharingStarted.Eagerly, GroupSortOrder.NAME)
+
+    val sortDescending: StateFlow<Boolean> = repository.preferences.sortDescending
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val groupSortDescending: StateFlow<Boolean> = repository.preferences.groupSortDescending
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     // ---- Settings ----------------------------------------------------------
 
     val preferences = repository.preferences
@@ -90,6 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val headsetAutoplay = preferences.headsetAutoplay.asState(false)
     val rememberPlayback = preferences.rememberPlayback.asState(true)
     val keepShuffle = preferences.keepShuffle.asState(true)
+    val replayGain = preferences.replayGain.asState(ReplayGainMode.OFF)
 
     /** Runs a preference write off the UI thread; every settings toggle funnels through here. */
     fun edit(block: suspend UserPreferences.() -> Unit) =
@@ -193,6 +220,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     lastCounted = id
                     repository.playStats.recordPlay(id, System.currentTimeMillis())
                 }
+            }
+        }
+
+        // Apply ReplayGain when the track changes. Reading the tag is deferred to here rather than
+        // done during the library scan: it needs file I/O per track, and only the one about to
+        // play matters.
+        viewModelScope.launch {
+            combine(
+                playerState.map { it.currentSongId }.distinctUntilChanged(),
+                preferences.replayGain,
+            ) { id, mode -> id to mode }.collect { (id, mode) ->
+                val song = id?.let(repository::songById)
+                if (mode == ReplayGainMode.OFF || song == null) {
+                    player.setVolume(1f)
+                    return@collect
+                }
+                val info = withContext(Dispatchers.IO) { ReplayGainReader.read(song.path) }
+                val db = when (mode) {
+                    ReplayGainMode.ALBUM -> info.albumGainDb ?: info.trackGainDb
+                    else -> info.trackGainDb ?: info.albumGainDb
+                }
+                player.setVolume(gainToVolume(db))
             }
         }
 
@@ -345,8 +394,81 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setSongSort(order: SortOrder) =
         viewModelScope.launch { repository.preferences.setSongSort(order) }
 
+    fun setGroupSort(order: GroupSortOrder) =
+        viewModelScope.launch { repository.preferences.setGroupSort(order) }
+
+    fun setSortDescending(descending: Boolean) =
+        viewModelScope.launch { repository.preferences.setSortDescending(descending) }
+
+    fun setGroupSortDescending(descending: Boolean) =
+        viewModelScope.launch { repository.preferences.setGroupSortDescending(descending) }
+
+    fun setGridView(grid: Boolean) =
+        viewModelScope.launch { repository.preferences.setGridView(grid) }
+
     fun showMetadata(song: Song) { _metadataSong.value = song }
     fun dismissMetadata() { _metadataSong.value = null }
+
+    // ---- Sorted group lists ------------------------------------------------
+    //
+    // Each tab reads its own pre-sorted flow rather than sorting during composition, so scrolling
+    // never pays for a re-sort. They all depend on repository.playStats.stats directly instead of
+    // the playStats property below — property initialisers run in declaration order, and these are
+    // declared first.
+
+    private data class SortInputs(
+        val order: GroupSortOrder,
+        val stats: Map<Long, PlayStat>,
+        val collator: NameCollator,
+        val descending: Boolean,
+    )
+
+    private val sortInputs =
+        combine(
+            repository.preferences.groupSort,
+            repository.playStats.stats,
+            repository.preferences.autoSortNames,
+            repository.preferences.groupSortDescending,
+        ) { order, stats, articles, descending ->
+            SortInputs(order, stats, NameCollator(articles), descending)
+        }
+
+    val sortedAlbums: StateFlow<List<Album>> =
+        combine(library, sortInputs) { lib, s ->
+            lib.albums.sortedWith(s.order.albumComparator(s.collator, s.stats, s.descending))
+        }.flowOn(Dispatchers.Default).asState(emptyList())
+
+    val sortedArtists: StateFlow<List<Artist>> =
+        combine(library, sortInputs) { lib, s ->
+            lib.artists.sortedWith(s.order.artistComparator(s.collator, s.stats, s.descending))
+        }.flowOn(Dispatchers.Default).asState(emptyList())
+
+    val sortedGenres: StateFlow<List<Genre>> =
+        combine(library, sortInputs) { lib, s ->
+            lib.genres.sortedWith(s.order.genreComparator(s.collator, s.stats, s.descending))
+        }.flowOn(Dispatchers.Default).asState(emptyList())
+
+    val sortedFolders: StateFlow<List<Folder>> =
+        combine(library, sortInputs) { lib, s ->
+            lib.folders.sortedWith(s.order.folderComparator(s.collator, s.descending))
+        }.flowOn(Dispatchers.Default).asState(emptyList())
+
+    val sortedPlaylists: StateFlow<List<Playlist>> =
+        combine(repository.playlists.playlists, sortInputs) { lists, s ->
+            lists.sortedWith(
+                s.order.playlistComparator(s.collator, s.stats, s.descending) {
+                    repository.songsByIds(it.songIds)
+                }
+            )
+        }.flowOn(Dispatchers.Default).asState(emptyList())
+
+    // ---- Duplicates --------------------------------------------------------
+
+    /** Tracks that appear more than once. Reported only — nothing here touches a file. */
+    val duplicates: StateFlow<List<DuplicateGroup>> =
+        library.map { findDuplicates(it.songs) }
+            .flowOn(Dispatchers.Default)
+            .asState(emptyList())
 
     // ---- Playlists ---------------------------------------------------------
 

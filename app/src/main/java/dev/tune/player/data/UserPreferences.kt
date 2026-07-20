@@ -88,6 +88,10 @@ class UserPreferences(private val context: Context) {
         val excludedFolders = stringSetPreferencesKey("excluded_folders")
         val folderMode = stringPreferencesKey("folder_mode")
         val songSort = stringPreferencesKey("song_sort")
+        val groupSort = stringPreferencesKey("group_sort")
+        val sortDescending = booleanPreferencesKey("sort_descending")
+        val groupSortDescending = booleanPreferencesKey("group_sort_descending")
+        val replayGain = stringPreferencesKey("replay_gain")
 
         // Library
         val observing = booleanPreferencesKey("observe_media_store")
@@ -178,6 +182,24 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setSongSort(order: SortOrder) = edit { it[Keys.songSort] = order.name }
 
+    /** Order for the album, artist, genre, playlist and folder tabs. */
+    val groupSort: Flow<GroupSortOrder> = flow { prefs ->
+        prefs[Keys.groupSort]?.let { n -> GroupSortOrder.entries.firstOrNull { it.name == n } }
+            ?: GroupSortOrder.NAME
+    }
+
+    suspend fun setGroupSort(order: GroupSortOrder) = edit { it[Keys.groupSort] = order.name }
+
+    /** Sort direction for song lists and for group tabs, tracked separately. */
+    val sortDescending: Flow<Boolean> = flow { it[Keys.sortDescending] ?: false }
+
+    val groupSortDescending: Flow<Boolean> = flow { it[Keys.groupSortDescending] ?: false }
+
+    suspend fun setSortDescending(value: Boolean) = edit { it[Keys.sortDescending] = value }
+
+    suspend fun setGroupSortDescending(value: Boolean) =
+        edit { it[Keys.groupSortDescending] = value }
+
     /**
      * Whether the stored folder list is a deny-list or an allow-list. Defaults to excluding, so a
      * fresh install scans everything.
@@ -229,6 +251,14 @@ class UserPreferences(private val context: Context) {
     val rememberPlayback: Flow<Boolean> = flow { it[Keys.rememberPlayback] ?: true }
 
     val keepShuffle: Flow<Boolean> = flow { it[Keys.keepShuffle] ?: true }
+
+    /** Which ReplayGain tag, if any, adjusts playback volume. */
+    val replayGain: Flow<ReplayGainMode> = flow { prefs ->
+        prefs[Keys.replayGain]?.let { n -> ReplayGainMode.entries.firstOrNull { it.name == n } }
+            ?: ReplayGainMode.OFF
+    }
+
+    suspend fun setReplayGain(mode: ReplayGainMode) = edit { it[Keys.replayGain] = mode.name }
 
     suspend fun setPlayInListWith(mode: PlayInMode) = edit { it[Keys.playInListWith] = mode.name }
 

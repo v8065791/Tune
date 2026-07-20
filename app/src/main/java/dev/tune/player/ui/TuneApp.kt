@@ -37,6 +37,10 @@ private object Routes {
     const val HOME = "home"
     const val NOW_PLAYING = "now_playing"
     const val SETTINGS = "settings"
+    const val SETTINGS_LIBRARY = "settings/library"
+    const val SETTINGS_PLAYBACK = "settings/playback"
+    const val SETTINGS_APPEARANCE = "settings/appearance"
+    const val DUPLICATES = "duplicates"
     const val SEARCH = "search"
     const val FOLDER_SETTINGS = "folder_settings"
     const val HOME_TABS = "home_tabs"
@@ -117,10 +121,39 @@ fun TuneApp(vm: MainViewModel) {
 
         composable(Routes.SETTINGS) {
             SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenLibrary = { navController.navigate(Routes.SETTINGS_LIBRARY) },
+                onOpenPlayback = { navController.navigate(Routes.SETTINGS_PLAYBACK) },
+                onOpenAppearance = { navController.navigate(Routes.SETTINGS_APPEARANCE) },
+            )
+        }
+
+        composable(Routes.SETTINGS_LIBRARY) {
+            LibrarySettingsScreen(
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onOpenFolders = { navController.navigate(Routes.FOLDER_SETTINGS) },
+                onOpenDuplicates = { navController.navigate(Routes.DUPLICATES) },
+            )
+        }
+
+        composable(Routes.SETTINGS_PLAYBACK) {
+            PlaybackSettingsScreen(vm = vm, onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.SETTINGS_APPEARANCE) {
+            AppearanceSettingsScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() },
                 onOpenHomeTabs = { navController.navigate(Routes.HOME_TABS) },
+            )
+        }
+
+        composable(Routes.DUPLICATES) {
+            DuplicatesScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() },
+                onSongMenu = { actionsSong = it },
             )
         }
 

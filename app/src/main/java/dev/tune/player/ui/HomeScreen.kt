@@ -10,8 +10,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Refresh
@@ -19,6 +23,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -40,6 +45,7 @@ import dev.tune.player.data.Album
 import dev.tune.player.data.Artist
 import dev.tune.player.data.Folder
 import dev.tune.player.data.Genre
+import dev.tune.player.data.GroupSortOrder
 import dev.tune.player.data.HomeTab
 import dev.tune.player.data.Playlist
 import dev.tune.player.data.Song
@@ -52,8 +58,14 @@ import dev.tune.player.ui.tabs.PlaylistsTab
 import dev.tune.player.ui.tabs.SongsTab
 import kotlinx.coroutines.launch
 
-/** Tabs whose contents are a flat song list, and so respond to the sort order. */
-private val SORTABLE_TABS = setOf(HomeTab.SONGS, HomeTab.FAVOURITES)
+/**
+ * Tabs whose contents are a flat song list. These use [SortOrder]; every other tab lists groups
+ * and uses [GroupSortOrder] instead.
+ *
+ * Most played is deliberately absent: it is already ordered by play count, and letting the sort
+ * button reorder it would leave the tab not doing what its name says.
+ */
+private val SONG_TABS = setOf(HomeTab.SONGS, HomeTab.FAVOURITES)
 
 /** Contextual toolbar shown in place of the normal one while songs are selected. */
 @Composable
@@ -95,6 +107,16 @@ private fun SelectionBar(
     )
 }
 
+/** One entry in the sort menu, ticked when it is the active order. */
+@Composable
+private fun SortItem(label: String, active: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        trailingIcon = { if (active) Icon(Icons.Default.Check, contentDescription = null) },
+        onClick = onClick,
+    )
+}
+
 @Composable
 fun HomeScreen(
     vm: MainViewModel,
@@ -111,11 +133,20 @@ fun HomeScreen(
     onSelectionToPlaylist: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
-    val playlists by vm.playlists.collectAsState()
+    // Group tabs read pre-sorted flows so the chosen order applies without sorting during layout.
+    val albums by vm.sortedAlbums.collectAsState()
+    val artists by vm.sortedArtists.collectAsState()
+    val genres by vm.sortedGenres.collectAsState()
+    val folders by vm.sortedFolders.collectAsState()
+    val playlists by vm.sortedPlaylists.collectAsState()
     val playerState by vm.playerState.collectAsState()
     val isScanning by vm.isScanning.collectAsState()
     val sort by vm.songSort.collectAsState()
+    val groupSort by vm.groupSort.collectAsState()
+    val sortDescending by vm.sortDescending.collectAsState()
+    val groupSortDescending by vm.groupSortDescending.collectAsState()
     val tabs by vm.homeTabs.collectAsState()
+    val grid by vm.gridView.collectAsState()
 
     // pageCount is read lazily, so removing a tab in settings updates the pager in place.
     val pagerState = rememberPagerState { tabs.size }
@@ -144,28 +175,59 @@ fun HomeScreen(
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
                     }
-                    // Sorting applies to any tab that renders a flat song list.
-                    if (currentTab in SORTABLE_TABS) {
+                    // Every tab sorts; song tabs and group tabs just use different orders.
+                    if (currentTab != null && currentTab != HomeTab.MOST_PLAYED) {
                         IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort songs")
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
                         }
+                        val songTab = currentTab in SONG_TABS
+                        // Song lists and group tabs keep their own order and direction, so
+                        // sorting albums by date doesn't silently reorder the songs tab too.
+                        val descending = if (songTab) sortDescending else groupSortDescending
                         DropdownMenu(
                             expanded = sortMenuOpen,
                             onDismissRequest = { sortMenuOpen = false },
                         ) {
-                            SortOrder.entries.forEach { order ->
-                                DropdownMenuItem(
-                                    text = { Text(order.label) },
-                                    trailingIcon = {
-                                        if (order == sort) Icon(Icons.Default.Check, null)
-                                    },
-                                    onClick = {
+                            if (songTab) {
+                                SortOrder.entries.forEach { order ->
+                                    SortItem(order.label, order == sort) {
                                         vm.setSongSort(order)
                                         sortMenuOpen = false
-                                    },
-                                )
+                                    }
+                                }
+                            } else {
+                                GroupSortOrder.entries.forEach { order ->
+                                    SortItem(order.label, order == groupSort) {
+                                        vm.setGroupSort(order)
+                                        sortMenuOpen = false
+                                    }
+                                }
                             }
+
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(if (descending) "Descending" else "Ascending") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (descending) Icons.Default.ArrowDownward
+                                        else Icons.Default.ArrowUpward,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    if (songTab) vm.setSortDescending(!descending)
+                                    else vm.setGroupSortDescending(!descending)
+                                    sortMenuOpen = false
+                                },
+                            )
                         }
+                    }
+                    IconButton(onClick = { vm.setGridView(!grid) }) {
+                        Icon(
+                            imageVector = if (grid) Icons.AutoMirrored.Filled.ViewList
+                            else Icons.Default.GridView,
+                            contentDescription = if (grid) "Show as a list" else "Show as a grid",
+                        )
                     }
                     IconButton(onClick = { vm.refresh() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Rescan library")
@@ -199,10 +261,11 @@ fun HomeScreen(
                         vm = vm,
                         currentSongId = playerState.currentSongId,
                         onSongMenu = onSongMenu,
+                        grid = grid,
                     )
-                    HomeTab.ALBUMS -> AlbumsTab(library.albums, vm, onAlbumClick)
-                    HomeTab.ARTISTS -> ArtistsTab(library.artists, vm, onArtistClick)
-                    HomeTab.GENRES -> GenresTab(library.genres, onGenreClick)
+                    HomeTab.ALBUMS -> AlbumsTab(albums, vm, onAlbumClick, grid)
+                    HomeTab.ARTISTS -> ArtistsTab(artists, vm, onArtistClick, grid)
+                    HomeTab.GENRES -> GenresTab(genres, vm, onGenreClick, grid)
                     HomeTab.FAVOURITES -> {
                         val favourites by vm.favouriteSongs.collectAsState()
                         SongsTab(
@@ -210,6 +273,7 @@ fun HomeScreen(
                             vm = vm,
                             currentSongId = playerState.currentSongId,
                             onSongMenu = onSongMenu,
+                            grid = grid,
                             emptyMessage = "No favourites yet.\nTap the heart on the player.",
                         )
                     }
@@ -220,11 +284,13 @@ fun HomeScreen(
                             vm = vm,
                             currentSongId = playerState.currentSongId,
                             onSongMenu = onSongMenu,
+                            grid = grid,
                             emptyMessage = "Nothing played yet.",
                         )
                     }
-                    HomeTab.PLAYLISTS -> PlaylistsTab(playlists, onPlaylistClick, onCreatePlaylist)
-                    HomeTab.FOLDERS -> FoldersTab(library.folders, onFolderClick)
+                    HomeTab.PLAYLISTS ->
+                        PlaylistsTab(playlists, vm, onPlaylistClick, onCreatePlaylist, grid)
+                    HomeTab.FOLDERS -> FoldersTab(folders, vm, onFolderClick, grid)
                     null -> Unit
                 }
             }

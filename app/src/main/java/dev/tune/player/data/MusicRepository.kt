@@ -53,6 +53,7 @@ class MusicRepository(private val context: Context) {
         val folders: Set<String>,
         val folderMode: FolderMode,
         val sort: SortOrder,
+        val sortDescending: Boolean,
         val separators: String,
         val autoSortNames: Boolean,
         val hideCollaborators: Boolean,
@@ -63,15 +64,20 @@ class MusicRepository(private val context: Context) {
         val folderOptions =
             combine(preferences.excludedFolders, preferences.folderMode, ::Pair)
 
+        // Order and direction travel together, keeping combine within its five-flow arity.
+        val sortOptions = combine(preferences.songSort, preferences.sortDescending, ::Pair)
+
         val options =
             combine(
                 folderOptions,
-                preferences.songSort,
+                sortOptions,
                 preferences.separators,
                 preferences.autoSortNames,
                 preferences.hideCollaborators,
-            ) { (folders, mode), sort, separators, autoSort, hideCollabs ->
-                LibraryOptions(folders, mode, sort, separators, autoSort, hideCollabs)
+            ) { (folders, mode), (sort, descending), separators, autoSort, hideCollabs ->
+                LibraryOptions(
+                    folders, mode, sort, descending, separators, autoSort, hideCollabs,
+                )
             }
 
         scope.launch {
@@ -244,7 +250,9 @@ class MusicRepository(private val context: Context) {
             .sortedBy { it.path }
 
         Library(
-            songs = visible.sortedWith(sort.comparator(collator, options.stats)),
+            songs = visible.sortedWith(
+                sort.comparator(collator, options.stats, options.sortDescending)
+            ),
             albums = albums,
             artists = artists,
             genres = genres,
@@ -336,19 +344,33 @@ private fun Song.albumArtistName(): String = albumArtist?.takeIf { it.isNotBlank
  */
 private fun artistIdOf(name: String): Long = name.lowercase().hashCode().toLong()
 
+/**
+ * All comparators are ascending; [descending] reverses whichever is chosen. Keeping direction out
+ * of the orders themselves means the sort menu's arrow matches what the list actually does.
+ */
 fun SortOrder.comparator(
     collator: NameCollator = NameCollator(false),
     stats: Map<Long, PlayStat> = emptyMap(),
-): Comparator<Song> = when (this) {
-    SortOrder.TITLE -> collator.comparingBy { it.title }
-    SortOrder.ARTIST ->
-        collator.comparingBy<Song> { it.artist }
-            .thenBy { it.album.lowercase() }
-            .thenBy { it.track }
-    SortOrder.ALBUM -> compareBy({ it.album.lowercase() }, { it.disc }, { it.track })
-    SortOrder.YEAR -> compareByDescending<Song> { it.year }.thenBy { it.title.lowercase() }
-    SortOrder.DURATION -> compareBy { it.durationMs }
-    SortOrder.DATE_ADDED -> compareByDescending { it.dateAddedSeconds }
-    SortOrder.MOST_PLAYED -> compareByDescending { stats[it.id]?.count ?: 0 }
-    SortOrder.RECENTLY_PLAYED -> compareByDescending { stats[it.id]?.lastPlayedEpochMs ?: 0L }
+    descending: Boolean = false,
+): Comparator<Song> {
+    val ascending: Comparator<Song> = when (this) {
+        SortOrder.TITLE -> collator.comparingBy { it.title }
+        SortOrder.ARTIST ->
+            collator.comparingBy<Song> { it.artist }
+                .thenBy { it.album.lowercase() }
+                .thenBy { it.track }
+        SortOrder.ALBUM -> compareBy({ it.album.lowercase() }, { it.disc }, { it.track })
+        SortOrder.ARTIST_YEAR ->
+            collator.comparingBy<Song> { it.artist }
+                .thenBy { it.year }
+                .thenBy { it.album.lowercase() }
+                .thenBy { it.disc }
+                .thenBy { it.track }
+        SortOrder.YEAR -> compareBy<Song> { it.year }.thenBy { it.title.lowercase() }
+        SortOrder.DURATION -> compareBy { it.durationMs }
+        SortOrder.DATE_ADDED -> compareBy { it.dateAddedSeconds }
+        SortOrder.MOST_PLAYED -> compareBy { stats[it.id]?.count ?: 0 }
+        SortOrder.RECENTLY_PLAYED -> compareBy { stats[it.id]?.lastPlayedEpochMs ?: 0L }
+    }
+    return if (descending) ascending.reversed() else ascending
 }

@@ -153,6 +153,14 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         syncState()
     }
 
+    /**
+     * Scales output volume, used to apply ReplayGain. This is the player's own volume, separate
+     * from the device volume the user sets with the hardware keys.
+     */
+    fun setVolume(volume: Float) {
+        controller?.volume = volume.coerceIn(0f, 1f)
+    }
+
     /** Playback rate, 1.0 being normal. Pitch is left untouched. */
     fun setSpeed(speed: Float) {
         controller?.setPlaybackSpeed(speed.coerceIn(MIN_SPEED, MAX_SPEED))
