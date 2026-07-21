@@ -7,18 +7,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -51,6 +45,7 @@ import dev.tune.player.data.HomeTab
 import dev.tune.player.data.Playlist
 import dev.tune.player.data.Song
 import dev.tune.player.data.SortOrder
+import dev.tune.player.ui.components.SelectionTopBar
 import dev.tune.player.ui.tabs.AlbumsTab
 import dev.tune.player.ui.tabs.ArtistsTab
 import dev.tune.player.ui.tabs.FoldersTab
@@ -67,50 +62,6 @@ import kotlinx.coroutines.launch
  * button reorder it would leave the tab not doing what its name says.
  */
 private val SONG_TABS = setOf(HomeTab.SONGS, HomeTab.FAVOURITES)
-
-/** Contextual toolbar shown in place of the normal one while songs are selected. */
-@Composable
-private fun SelectionBar(
-    count: Int,
-    onClear: () -> Unit,
-    onSelectAll: () -> Unit,
-    onPlay: () -> Unit,
-    onQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onSetGenre: () -> Unit,
-) {
-    TopAppBar(
-        title = { Text("$count selected") },
-        navigationIcon = {
-            IconButton(onClick = onClear) {
-                Icon(Icons.Default.Close, contentDescription = "Clear selection")
-            }
-        },
-        actions = {
-            IconButton(onClick = onPlay) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play selection")
-            }
-            IconButton(onClick = onQueue) {
-                Icon(
-                    Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = "Add selection to queue",
-                )
-            }
-            IconButton(onClick = onAddToPlaylist) {
-                Icon(
-                    Icons.AutoMirrored.Filled.PlaylistAdd,
-                    contentDescription = "Add selection to playlist",
-                )
-            }
-            IconButton(onClick = onSetGenre) {
-                Icon(Icons.Default.Category, contentDescription = "Set genre for selection")
-            }
-            IconButton(onClick = onSelectAll) {
-                Icon(Icons.Default.SelectAll, contentDescription = "Select all")
-            }
-        },
-    )
-}
 
 /** One entry in the sort menu, ticked when it is the active order. */
 @Composable
@@ -177,7 +128,7 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            if (selection.isNotEmpty()) SelectionBar(
+            if (selection.isNotEmpty()) SelectionTopBar(
                 count = selection.size,
                 onClear = { vm.clearSelection() },
                 // Scoped to the tab in view: "select all" on Favourites means the favourites,

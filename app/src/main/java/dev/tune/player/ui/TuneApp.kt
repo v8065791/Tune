@@ -188,6 +188,8 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
 
@@ -217,6 +219,8 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
 
@@ -229,6 +233,8 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
 
@@ -241,6 +247,8 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
 
@@ -253,6 +261,8 @@ fun TuneApp(vm: MainViewModel) {
                 vm = vm,
                 onBack = { navController.popBackStack() },
                 onSongMenu = { actionsSong = it },
+                onSelectionToPlaylist = { playlistPickerForSelection = true },
+                onSelectionSetGenre = { genreForSelection = true },
             )
         }
         }
@@ -281,7 +291,9 @@ fun TuneApp(vm: MainViewModel) {
                 actionsSong = null
             },
             onGoToAlbum = { navController.navigate(Routes.album(song.albumId)) },
-            onGoToArtist = { navController.navigate(Routes.artist(song.artistId)) },
+            onGoToArtist = {
+                vm.artistForSong(song)?.let { navController.navigate(Routes.artist(it.id)) }
+            },
             onShowMetadata = {
                 vm.showMetadata(song)
                 actionsSong = null

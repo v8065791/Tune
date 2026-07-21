@@ -15,13 +15,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -154,6 +161,84 @@ fun SongRow(
             Icon(Icons.Default.MoreVert, contentDescription = "More options for ${song.title}")
         }
     }
+}
+
+/**
+ * A [SongRow] wired for bulk selection. While [selecting] is on, a tap and the overflow button both
+ * toggle the checkbox instead of playing or opening the menu; a long-press always toggles, which is
+ * how a selection is begun. Kept ViewModel-free so it works from any screen that lists songs.
+ */
+@Composable
+fun SelectableSongRow(
+    song: Song,
+    art: ArtRequest,
+    highlighted: Boolean,
+    selecting: Boolean,
+    isSelected: Boolean,
+    onToggle: () -> Unit,
+    onPlay: () -> Unit,
+    onMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: String = formatDuration(song.durationMs),
+) {
+    SongRow(
+        song = song,
+        art = art,
+        highlighted = highlighted,
+        modifier = modifier,
+        trailing = trailing,
+        onClick = { if (selecting) onToggle() else onPlay() },
+        onMenuClick = { if (selecting) onToggle() else onMenu() },
+        onLongClick = onToggle,
+        selected = if (selecting) isSelected else null,
+    )
+}
+
+/**
+ * Contextual top bar shown in place of a screen's normal one while songs are selected. Shared by the
+ * home song tabs and every detail track list so selection looks and behaves the same everywhere.
+ */
+@Composable
+fun SelectionTopBar(
+    count: Int,
+    onClear: () -> Unit,
+    onSelectAll: () -> Unit,
+    onPlay: () -> Unit,
+    onQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onSetGenre: () -> Unit,
+) {
+    TopAppBar(
+        title = { Text("$count selected") },
+        navigationIcon = {
+            IconButton(onClick = onClear) {
+                Icon(Icons.Default.Close, contentDescription = "Clear selection")
+            }
+        },
+        actions = {
+            IconButton(onClick = onPlay) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play selection")
+            }
+            IconButton(onClick = onQueue) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = "Add selection to queue",
+                )
+            }
+            IconButton(onClick = onAddToPlaylist) {
+                Icon(
+                    Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = "Add selection to playlist",
+                )
+            }
+            IconButton(onClick = onSetGenre) {
+                Icon(Icons.Default.Category, contentDescription = "Set genre for selection")
+            }
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Default.SelectAll, contentDescription = "Select all")
+            }
+        },
+    )
 }
 
 /**

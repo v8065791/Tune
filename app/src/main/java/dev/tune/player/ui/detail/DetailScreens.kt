@@ -59,7 +59,8 @@ import dev.tune.player.data.comparator
 import dev.tune.player.ui.MainViewModel
 import dev.tune.player.ui.components.Artwork
 import dev.tune.player.ui.components.EmptyState
-import dev.tune.player.ui.components.SongRow
+import dev.tune.player.ui.components.SelectableSongRow
+import dev.tune.player.ui.components.SelectionTopBar
 import dev.tune.player.ui.components.formatDuration
 
 /**
@@ -180,12 +181,38 @@ private fun SongsHeader(vm: MainViewModel, count: Int) {
     }
 }
 
+/**
+ * The contextual selection bar as it sits atop a detail track list. [songsInView] is the list the
+ * screen is showing, so "select all", play and queue act on exactly those tracks in their current
+ * order. Only rendered while a selection is active.
+ */
+@Composable
+private fun DetailSelectionBar(
+    vm: MainViewModel,
+    count: Int,
+    songsInView: List<Song>,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
+) {
+    SelectionTopBar(
+        count = count,
+        onClear = { vm.clearSelection() },
+        onSelectAll = { vm.selectAll(songsInView) },
+        onPlay = { vm.playSelection(songsInView) },
+        onQueue = { vm.queueSelection(songsInView) },
+        onAddToPlaylist = onSelectionToPlaylist,
+        onSetGenre = onSelectionSetGenre,
+    )
+}
+
 @Composable
 fun AlbumDetailScreen(
     albumId: Long,
     vm: MainViewModel,
     onBack: () -> Unit,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     // Re-read from the library flow so the screen follows rescans and folder changes.
     val library by vm.library.collectAsState()
@@ -224,6 +251,8 @@ fun AlbumDetailScreen(
         currentSongId = playerState.currentSongId,
         vm = vm,
         onSongMenu = onSongMenu,
+        onSelectionToPlaylist = onSelectionToPlaylist,
+        onSelectionSetGenre = onSelectionSetGenre,
     )
 }
 
@@ -233,6 +262,8 @@ fun ArtistDetailScreen(
     vm: MainViewModel,
     onBack: () -> Unit,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
     val overrides by vm.artworkOverrides.collectAsState()
@@ -266,6 +297,8 @@ fun ArtistDetailScreen(
         currentSongId = playerState.currentSongId,
         vm = vm,
         onSongMenu = onSongMenu,
+        onSelectionToPlaylist = onSelectionToPlaylist,
+        onSelectionSetGenre = onSelectionSetGenre,
     )
 }
 
@@ -275,10 +308,14 @@ fun PlaylistDetailScreen(
     vm: MainViewModel,
     onBack: () -> Unit,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val playlists by vm.playlists.collectAsState()
     val library by vm.library.collectAsState()
     val playerState by vm.playerState.collectAsState()
+    val selection by vm.selection.collectAsState()
+    val selecting = selection.isNotEmpty()
     val playlist = playlists.firstOrNull { it.id == playlistId }
 
     if (playlist == null) {
@@ -292,7 +329,9 @@ fun PlaylistDetailScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) DetailSelectionBar(
+                vm, selection.size, ordered, onSelectionToPlaylist, onSelectionSetGenre,
+            ) else TopAppBar(
                 title = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -320,12 +359,15 @@ fun PlaylistDetailScreen(
             }
             item { SongsHeader(vm, ordered.size) }
             itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
-                SongRow(
+                SelectableSongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(ordered, index) },
-                    onMenuClick = { onSongMenu(song) },
+                    selecting = selecting,
+                    isSelected = song.id in selection,
+                    onToggle = { vm.toggleSelection(song) },
+                    onPlay = { vm.playAll(ordered, index) },
+                    onMenu = { onSongMenu(song) },
                 )
             }
         }
@@ -338,9 +380,13 @@ fun GenreDetailScreen(
     vm: MainViewModel,
     onBack: () -> Unit,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
     val playerState by vm.playerState.collectAsState()
+    val selection by vm.selection.collectAsState()
+    val selecting = selection.isNotEmpty()
     val genre = library.genres.firstOrNull { it.id == genreId }
 
     if (genre == null) {
@@ -352,7 +398,9 @@ fun GenreDetailScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) DetailSelectionBar(
+                vm, selection.size, ordered, onSelectionToPlaylist, onSelectionSetGenre,
+            ) else TopAppBar(
                 title = { Text(genre.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -371,12 +419,15 @@ fun GenreDetailScreen(
             }
             item { SongsHeader(vm, ordered.size) }
             itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
-                SongRow(
+                SelectableSongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(ordered, index) },
-                    onMenuClick = { onSongMenu(song) },
+                    selecting = selecting,
+                    isSelected = song.id in selection,
+                    onToggle = { vm.toggleSelection(song) },
+                    onPlay = { vm.playAll(ordered, index) },
+                    onMenu = { onSongMenu(song) },
                 )
             }
         }
@@ -389,15 +440,21 @@ fun FolderDetailScreen(
     vm: MainViewModel,
     onBack: () -> Unit,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val library by vm.library.collectAsState()
     val playerState by vm.playerState.collectAsState()
+    val selection by vm.selection.collectAsState()
+    val selecting = selection.isNotEmpty()
     val songs = remember(folderPath, library) { vm.songsInFolder(folderPath) }
     val ordered = sortedForDetail(vm, songs)
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) DetailSelectionBar(
+                vm, selection.size, ordered, onSelectionToPlaylist, onSelectionSetGenre,
+            ) else TopAppBar(
                 title = {
                     Column {
                         Text(
@@ -435,12 +492,15 @@ fun FolderDetailScreen(
             }
             item { SongsHeader(vm, ordered.size) }
             itemsIndexed(ordered, key = { _, song -> song.id }) { index, song ->
-                SongRow(
+                SelectableSongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == playerState.currentSongId,
-                    onClick = { vm.playAll(ordered, index) },
-                    onMenuClick = { onSongMenu(song) },
+                    selecting = selecting,
+                    isSelected = song.id in selection,
+                    onToggle = { vm.toggleSelection(song) },
+                    onPlay = { vm.playAll(ordered, index) },
+                    onMenu = { onSongMenu(song) },
                 )
             }
         }
@@ -463,13 +523,19 @@ private fun DetailScaffold(
     currentSongId: Long?,
     vm: MainViewModel,
     onSongMenu: (Song) -> Unit,
+    onSelectionToPlaylist: () -> Unit,
+    onSelectionSetGenre: () -> Unit,
 ) {
     val ordered = sortedForDetail(vm, songs)
     val reordered = vm.detailSort.collectAsState().value != null
+    val selection by vm.selection.collectAsState()
+    val selecting = selection.isNotEmpty()
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) DetailSelectionBar(
+                vm, selection.size, ordered, onSelectionToPlaylist, onSelectionSetGenre,
+            ) else TopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -529,12 +595,15 @@ private fun DetailScaffold(
                         modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                     )
                 }
-                SongRow(
+                SelectableSongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == currentSongId,
-                    onClick = { vm.playAll(ordered, index) },
-                    onMenuClick = { onSongMenu(song) },
+                    selecting = selecting,
+                    isSelected = song.id in selection,
+                    onToggle = { vm.toggleSelection(song) },
+                    onPlay = { vm.playAll(ordered, index) },
+                    onMenu = { onSongMenu(song) },
                     trailing = song.track.takeIf { it > 0 && !reordered }?.toString()
                         ?: formatDuration(song.durationMs),
                 )

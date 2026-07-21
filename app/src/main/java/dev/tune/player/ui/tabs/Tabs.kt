@@ -36,7 +36,7 @@ import dev.tune.player.ui.MainViewModel
 import dev.tune.player.ui.components.EmptyState
 import dev.tune.player.ui.components.GridCard
 import dev.tune.player.ui.components.ListCard
-import dev.tune.player.ui.components.SongRow
+import dev.tune.player.ui.components.SelectableSongRow
 
 /** Bottom padding so the mini player never covers the last list item. */
 private val ListBottomPadding = PaddingValues(bottom = 96.dp)
@@ -149,15 +149,15 @@ fun SongsTab(
         LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = ListBottomPadding) {
             // Keyed by song id so scroll position survives a re-sort.
             itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
-                SongRow(
+                SelectableSongRow(
                     song = song,
                     art = vm.artForSong(song),
                     highlighted = song.id == currentSongId,
-                    onClick = { onTap(song, index) },
-                    onMenuClick = { if (selecting) vm.toggleSelection(song) else onSongMenu(song) },
-                    selected = if (selecting) song.id in selection else null,
-                    // Long-press begins a bulk selection.
-                    onLongClick = { vm.toggleSelection(song) },
+                    selecting = selecting,
+                    isSelected = song.id in selection,
+                    onToggle = { vm.toggleSelection(song) },
+                    onPlay = { vm.playAll(songs, index) },
+                    onMenu = { onSongMenu(song) },
                 )
             }
         }
