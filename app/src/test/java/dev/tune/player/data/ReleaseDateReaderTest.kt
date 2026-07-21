@@ -163,7 +163,6 @@ class ReleaseDateReaderTest {
             id = 0,
             title = "",
             artist = "Artist",
-            artistId = 1,
             album = "Album",
             albumId = 1,
             albumArtist = null,

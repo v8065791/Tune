@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -33,6 +35,9 @@ class GenreStore(private val context: Context) {
     private val _overrides = MutableStateFlow<Map<Long, String>>(emptyMap())
     val overrides: StateFlow<Map<Long, String>> = _overrides.asStateFlow()
 
+    /** Serialises read-modify-write-persist so concurrent assigns can't lose each other. */
+    private val mutex = Mutex()
+
     suspend fun load() = withContext(Dispatchers.IO) {
         _overrides.value = runCatching {
             if (!file.exists()) return@runCatching emptyMap()
@@ -47,11 +52,13 @@ class GenreStore(private val context: Context) {
     suspend fun assign(songIds: Collection<Long>, genre: String) = withContext(Dispatchers.IO) {
         if (songIds.isEmpty()) return@withContext
         val trimmed = genre.trim()
-        _overrides.value = _overrides.value.toMutableMap().apply {
-            if (trimmed.isEmpty()) songIds.forEach(::remove)
-            else songIds.forEach { put(it, trimmed) }
+        mutex.withLock {
+            _overrides.value = _overrides.value.toMutableMap().apply {
+                if (trimmed.isEmpty()) songIds.forEach(::remove)
+                else songIds.forEach { put(it, trimmed) }
+            }
+            persist()
         }
-        persist()
     }
 
     private fun persist() {

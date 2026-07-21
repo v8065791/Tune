@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -19,6 +21,9 @@ class PlaylistStore(private val context: Context) {
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
+
+    /** Serialises read-modify-write-persist so concurrent edits can't lose each other's changes. */
+    private val mutex = Mutex()
 
     suspend fun load() = withContext(Dispatchers.IO) {
         _playlists.value = runCatching {
@@ -52,9 +57,11 @@ class PlaylistStore(private val context: Context) {
 
     private suspend fun mutate(transform: (List<Playlist>) -> List<Playlist>) =
         withContext(Dispatchers.IO) {
-            val next = transform(_playlists.value)
-            _playlists.value = next
-            runCatching { file.writeText(json.encodeToString(next)) }
+            mutex.withLock {
+                val next = transform(_playlists.value)
+                _playlists.value = next
+                runCatching { file.writeText(json.encodeToString(next)) }
+            }
             Unit
         }
 }

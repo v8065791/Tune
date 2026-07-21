@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -38,6 +40,9 @@ class ArtworkStore(private val context: Context) {
 
     private val _overrides = MutableStateFlow(ArtworkOverrides())
     val overrides: StateFlow<ArtworkOverrides> = _overrides.asStateFlow()
+
+    /** Serialises the index read-modify-write so concurrent set/clear calls can't lose entries. */
+    private val mutex = Mutex()
 
     suspend fun load() = withContext(Dispatchers.IO) {
         val parsed = runCatching {
@@ -97,20 +102,21 @@ class ArtworkStore(private val context: Context) {
     }
 
     /** @return null on success, or the reason the index could not be written. */
-    private fun update(transform: (ArtworkOverrides) -> ArtworkOverrides): String? {
-        val next = transform(_overrides.value)
-        _overrides.value = next
-        return runCatching {
-            indexFile.writeText(
-                json.encodeToString(
-                    OverridesFile(
-                        albumArt = next.albumArt.mapKeys { it.key.toString() },
-                        artistArt = next.artistArt.mapKeys { it.key.toString() },
+    private suspend fun update(transform: (ArtworkOverrides) -> ArtworkOverrides): String? =
+        mutex.withLock {
+            val next = transform(_overrides.value)
+            _overrides.value = next
+            runCatching {
+                indexFile.writeText(
+                    json.encodeToString(
+                        OverridesFile(
+                            albumArt = next.albumArt.mapKeys { it.key.toString() },
+                            artistArt = next.artistArt.mapKeys { it.key.toString() },
+                        )
                     )
                 )
-            )
-        }.exceptionOrNull()?.describe()
-    }
+            }.exceptionOrNull()?.describe()
+        }
 
     private fun Map<String, String>.mapNotNullKeysToLong(): Map<Long, String> =
         mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }

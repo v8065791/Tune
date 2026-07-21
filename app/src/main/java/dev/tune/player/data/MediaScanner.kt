@@ -21,7 +21,6 @@ object MediaScanner {
         add(MediaStore.Audio.Media._ID)
         add(MediaStore.Audio.Media.TITLE)
         add(MediaStore.Audio.Media.ARTIST)
-        add(MediaStore.Audio.Media.ARTIST_ID)
         add(MediaStore.Audio.Media.ALBUM)
         add(MediaStore.Audio.Media.ALBUM_ID)
         add(MediaStore.Audio.Media.COMPOSER)
@@ -69,7 +68,6 @@ object MediaScanner {
         private val id = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         private val title = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
         private val artist = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-        private val artistId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)
         private val album = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
         private val albumId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
         private val composer = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.COMPOSER)
@@ -101,7 +99,6 @@ object MediaScanner {
                 id = songId,
                 title = cursor.getStringOrNull(title) ?: path.substringAfterLast('/'),
                 artist = cursor.getStringOrNull(artist)?.takeUnless { it == UNKNOWN } ?: "Unknown artist",
-                artistId = cursor.getLong(artistId),
                 album = cursor.getStringOrNull(album)?.takeUnless { it == UNKNOWN } ?: "Unknown album",
                 albumId = cursor.getLong(albumId),
                 albumArtist = cursor.getStringOrNull(albumArtist),

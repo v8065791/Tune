@@ -19,8 +19,8 @@ device, plays it, and stays out of the way.
 - **ReplayGain** — MP3, FLAC, Ogg Vorbis and Opus
 - **Duplicate detection**
 - **Playback** — background service with notification, lockscreen and Bluetooth controls; shuffle,
-  repeat, queue reordering, seek, speed control, resume across restarts, headset autoplay, system
-  equalizer handoff
+  repeat, queue reordering, seek, speed control, resume across restarts (queue, position, shuffle
+  and repeat), pause on headphone disconnect, system equalizer handoff
 - **Playlists** — create, rename, delete, add and remove songs
 - **Appearance** — Material You, eight accent colours, AMOLED black, square or original-ratio
   covers

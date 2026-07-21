@@ -22,7 +22,6 @@ class DuplicateFinderTest {
         id = nextId++,
         title = title,
         artist = artist,
-        artistId = artist.hashCode().toLong(),
         album = album,
         albumId = album.hashCode().toLong(),
         albumArtist = artist,

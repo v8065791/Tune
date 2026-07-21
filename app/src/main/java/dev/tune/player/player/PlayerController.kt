@@ -171,9 +171,17 @@ class PlayerController(private val context: Context, private val scope: Coroutin
      * Restores a saved queue without starting playback — the user should come back to a paused
      * player, not have music start on its own.
      */
-    fun restore(songs: List<Song>, index: Int, positionMs: Long) {
+    fun restore(
+        songs: List<Song>,
+        index: Int,
+        positionMs: Long,
+        shuffle: Boolean = false,
+        repeatMode: Int = Player.REPEAT_MODE_OFF,
+    ) {
         val player = controller ?: return
         if (songs.isEmpty() || player.mediaItemCount > 0) return
+        player.shuffleModeEnabled = shuffle
+        player.repeatMode = repeatMode
         player.setMediaItems(songs.map(::toMediaItem), index.coerceIn(songs.indices), positionMs)
         player.prepare()
         syncState()

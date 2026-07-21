@@ -35,21 +35,28 @@ internal object TagReader {
      * the identification header rather than among the tags, so a sink of key/value pairs has
      * nowhere to put it — hence the odd-looking return type on an otherwise generic reader.
      */
-    fun read(path: String, sink: Sink): Float = runCatching {
+    fun read(path: String, sink: Sink): Float {
         val file = File(path)
-        if (!file.isFile) return@runCatching 0f
-        RandomAccessFile(file, "r").use { raf ->
-            if (raf.length() < MIN_HEADER_BYTES) return@use 0f
-            val magic = ByteArray(4)
-            raf.readFully(magic)
-            when {
-                magic.matches("ID3", length = 3) -> { readId3(raf, sink); 0f }
-                magic.matches("fLaC") -> { readFlac(raf, sink); 0f }
-                magic.matches("OggS") -> readOgg(raf, sink)
-                else -> 0f
+        if (!file.isFile) return 0f
+        return try {
+            RandomAccessFile(file, "r").use { raf ->
+                if (raf.length() < MIN_HEADER_BYTES) return 0f
+                val magic = ByteArray(4)
+                raf.readFully(magic)
+                when {
+                    magic.matches("ID3", length = 3) -> { readId3(raf, sink); 0f }
+                    magic.matches("fLaC") -> { readFlac(raf, sink); 0f }
+                    magic.matches("OggS") -> readOgg(raf, sink)
+                    else -> 0f
+                }
             }
+        } catch (_: Exception) {
+            // A malformed or unreadable file yields no tags rather than crashing the scan. Only
+            // Exceptions are swallowed — an Error (OutOfMemoryError, StackOverflowError) signals a
+            // real VM problem and is left to propagate rather than being masked as "untagged".
+            0f
         }
-    }.getOrElse { 0f }
+    }
 
     // ---- ID3v2 -------------------------------------------------------------
 

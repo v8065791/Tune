@@ -19,6 +19,7 @@ import dev.tune.player.data.HomeTab
 import dev.tune.player.data.NameCollator
 import dev.tune.player.data.PlayInMode
 import dev.tune.player.data.PlayStat
+import dev.tune.player.data.ReplayGainInfo
 import dev.tune.player.data.ReplayGainMode
 import dev.tune.player.data.ReplayGainReader
 import dev.tune.player.data.albumComparator
@@ -33,11 +34,15 @@ import dev.tune.player.data.Song
 import dev.tune.player.data.SortOrder
 import dev.tune.player.data.ThemeMode
 import dev.tune.player.data.UserPreferences
+import androidx.media3.common.Player
 import dev.tune.player.player.PlayerController
+import dev.tune.player.player.PlayerState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -61,6 +67,7 @@ data class SearchResults(
         get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && genres.isEmpty()
 }
 
+@OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = (application as TuneApplication).repository
@@ -119,7 +126,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val separators = preferences.separators.asState("")
     val playInListWith = preferences.playInListWith.asState(PlayInMode.FROM_LIST)
     val rewindOnPrevious = preferences.rewindOnPrevious.asState(true)
-    val headsetAutoplay = preferences.headsetAutoplay.asState(false)
     val rememberPlayback = preferences.rememberPlayback.asState(true)
     val keepShuffle = preferences.keepShuffle.asState(true)
     val replayGain = preferences.replayGain.asState(ReplayGainMode.OFF)
@@ -183,9 +189,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Case-insensitive substring match across songs, albums and artists. Recomputed from the
      * library so results follow rescans and folder changes.
+     *
+     * The filter runs on [Dispatchers.Default], not the collector's main thread — on a large
+     * library it is a full linear scan per keystroke, and the group-sort flows below use the same
+     * `flowOn`. The query is debounced so mid-typing keystrokes don't each trigger a scan.
      */
     val searchResults: StateFlow<SearchResults> =
-        combine(library, _searchQuery) { lib, query ->
+        combine(library, _searchQuery.debounce(SEARCH_DEBOUNCE_MS)) { lib, query ->
             val term = query.trim().lowercase()
             if (term.isBlank()) SearchResults()
             else SearchResults(
@@ -200,7 +210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 artists = lib.artists.filter { it.name.lowercase().contains(term) },
                 genres = lib.genres.filter { it.name.lowercase().contains(term) },
             )
-        }.asState(SearchResults())
+        }.flowOn(Dispatchers.Default).asState(SearchResults())
 
     private val _permissionGranted = MutableStateFlow(false)
     val permissionGranted: StateFlow<Boolean> = _permissionGranted.asStateFlow()
@@ -257,23 +267,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     player.setVolume(1f)
                     return@collect
                 }
-                val info = withContext(Dispatchers.IO) { ReplayGainReader.read(song.path) }
-                player.setVolume(info.volumeFor(mode))
+                player.setVolume(replayGainFor(song).volumeFor(mode))
             }
         }
 
-        // Persist the queue as it changes, so it survives the process being killed.
+        // Persist the queue so it survives the process being killed. The position poll fires
+        // roughly twice a second, so saving on every emission would rewrite DataStore
+        // continuously. Instead the structure — queue, index, shuffle, repeat — is written only
+        // when it actually changes, and the position on a coarse cadence while it advances.
+        // `sample` stops emitting once playback stops changing the state, so a paused player
+        // isn't written on a timer.
         viewModelScope.launch {
-            playerState.collect { state ->
-                if (state.queueIds.isNotEmpty() && preferences.rememberPlayback.first()) {
-                    preferences.saveResumeState(
-                        state.queueIds,
-                        state.queueIndex,
-                        state.positionMs,
-                    )
+            playerState
+                .distinctUntilChanged { a, b ->
+                    a.queueIds == b.queueIds && a.queueIndex == b.queueIndex &&
+                        a.shuffle == b.shuffle && a.repeatMode == b.repeatMode
                 }
-            }
+                .collect { persistResume(it) }
         }
+        viewModelScope.launch {
+            playerState.sample(RESUME_POSITION_SAVE_MS).collect { persistResume(it) }
+        }
+    }
+
+    // ReplayGain is read from the playing track's file. Caching by path — invalidated by mtime,
+    // the same signal ReleaseDateStore uses — means a track on repeat, or one revisited later in
+    // the session, is read from disk once. Only ever touched from the single ReplayGain collector,
+    // so a plain map is safe.
+    private data class GainEntry(val modified: Long, val info: ReplayGainInfo)
+    private val gainCache = HashMap<String, GainEntry>()
+
+    private suspend fun replayGainFor(song: Song): ReplayGainInfo {
+        gainCache[song.path]?.takeIf { it.modified == song.dateModifiedSeconds }?.let { return it.info }
+        val info = withContext(Dispatchers.IO) { ReplayGainReader.read(song.path) }
+        gainCache[song.path] = GainEntry(song.dateModifiedSeconds, info)
+        return info
+    }
+
+    /** Writes the resume snapshot, honouring [rememberPlayback] and skipping an empty queue. */
+    private suspend fun persistResume(state: PlayerState) {
+        if (!rememberPlayback.value || state.queueIds.isEmpty()) return
+        preferences.saveResumeState(
+            state.queueIds,
+            state.queueIndex,
+            state.positionMs,
+            state.shuffle,
+            state.repeatMode,
+        )
     }
 
     /**
@@ -287,10 +327,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queue = saved.queue.mapNotNull { songs[it] }
         if (queue.isEmpty()) return@launch
 
+        // Shuffle and repeat come back only when the user asked to keep them; otherwise the
+        // player starts in its default off state.
+        val keep = preferences.keepShuffle.first()
+        val shuffle = keep && saved.shuffle
+        val repeatMode = if (keep) saved.repeatMode else Player.REPEAT_MODE_OFF
+
         // The controller connects asynchronously; retry briefly rather than racing it.
         repeat(RESTORE_ATTEMPTS) {
             if (playerState.value.queueSize > 0) return@launch
-            player.restore(queue, saved.index, saved.positionMs)
+            player.restore(queue, saved.index, saved.positionMs, shuffle, repeatMode)
             delay(RESTORE_RETRY_MS)
         }
     }
@@ -308,6 +354,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun album(id: Long): Album? = repository.albumById(id)
     fun artist(id: Long): Artist? = repository.artistById(id)
+
+    /**
+     * The artist a song is filed under, for the "go to artist" action.
+     *
+     * Resolved by membership rather than from an id on the song: artists are keyed by a hash of
+     * the album-artist name (there is no stable MediaStore artist id to use), and with separators
+     * enabled a song can be filed under several. This returns the first that actually contains it.
+     */
+    fun artistForSong(song: Song): Artist? =
+        library.value.artists.firstOrNull { artist -> artist.songs.any { it.id == song.id } }
     fun genre(id: Long): Genre? = library.value.genres.firstOrNull { it.id == id }
     fun playlist(id: String): Playlist? = playlists.value.firstOrNull { it.id == id }
     fun songsOf(playlist: Playlist): List<Song> = repository.songsByIds(playlist.songIds)
@@ -560,6 +616,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val RESTORE_ATTEMPTS = 10
         const val RESTORE_RETRY_MS = 300L
         const val PLAY_COUNT_AFTER_MS = 30_000L
+
+        /** How often the advancing playback position is written to the resume snapshot. */
+        const val RESUME_POSITION_SAVE_MS = 5_000L
+
+        /** Quiet period after a keystroke before the search filter re-runs. */
+        const val SEARCH_DEBOUNCE_MS = 150L
     }
 
     override fun onCleared() {

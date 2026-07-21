@@ -159,14 +159,6 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             ) { value -> vm.edit { setRewindOnPrevious(value) } }
         }
         item {
-            val autoplay by vm.headsetAutoplay.collectAsState()
-            SwitchRow(
-                title = "Play on headset connect",
-                subtitle = "Resume when headphones are plugged in",
-                checked = autoplay,
-            ) { value -> vm.edit { setHeadsetAutoplay(value) } }
-        }
-        item {
             val remember by vm.rememberPlayback.collectAsState()
             SwitchRow(
                 title = "Remember playback",

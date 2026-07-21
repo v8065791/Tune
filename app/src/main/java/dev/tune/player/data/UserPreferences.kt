@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -26,8 +27,17 @@ enum class HomeTab(val label: String) {
     FOLDERS("Folders"),
 }
 
-/** Playback state saved between app launches. */
-data class ResumeState(val queue: List<Long>, val index: Int, val positionMs: Long)
+/**
+ * Playback state saved between app launches. [repeatMode] holds a media3 `Player.REPEAT_MODE_*`
+ * constant as a plain Int, so this stays free of any media3 dependency and JVM-testable.
+ */
+data class ResumeState(
+    val queue: List<Long>,
+    val index: Int,
+    val positionMs: Long,
+    val shuffle: Boolean = false,
+    val repeatMode: Int = 0,
+)
 
 /** How the chosen folder list is applied to the library. */
 enum class FolderMode(val label: String) {
@@ -104,7 +114,6 @@ class UserPreferences(private val context: Context) {
         // Playback
         val playInListWith = stringPreferencesKey("play_in_list_with")
         val rewindOnPrevious = booleanPreferencesKey("rewind_on_previous")
-        val headsetAutoplay = booleanPreferencesKey("headset_autoplay")
         val rememberPlayback = booleanPreferencesKey("remember_playback")
         val keepShuffle = booleanPreferencesKey("keep_shuffle")
 
@@ -118,13 +127,14 @@ class UserPreferences(private val context: Context) {
         val homeTabs = stringPreferencesKey("home_tabs")
         val accent = stringPreferencesKey("accent_colour")
         val gridView = booleanPreferencesKey("grid_view")
-        val skipSilence = booleanPreferencesKey("skip_silence")
 
         // Favourites and resume state
         val favourites = stringSetPreferencesKey("favourite_songs")
         val resumeQueue = stringPreferencesKey("resume_queue")
         val resumeIndex = stringPreferencesKey("resume_index")
         val resumePosition = stringPreferencesKey("resume_position")
+        val resumeShuffle = booleanPreferencesKey("resume_shuffle")
+        val resumeRepeat = intPreferencesKey("resume_repeat")
     }
 
     // ---- Favourites --------------------------------------------------------
@@ -154,13 +164,23 @@ class UserPreferences(private val context: Context) {
             queue = ids,
             index = prefs[Keys.resumeIndex]?.toIntOrNull() ?: 0,
             positionMs = prefs[Keys.resumePosition]?.toLongOrNull() ?: 0L,
+            shuffle = prefs[Keys.resumeShuffle] ?: false,
+            repeatMode = prefs[Keys.resumeRepeat] ?: 0,
         )
     }
 
-    suspend fun saveResumeState(queue: List<Long>, index: Int, positionMs: Long) = edit {
+    suspend fun saveResumeState(
+        queue: List<Long>,
+        index: Int,
+        positionMs: Long,
+        shuffle: Boolean,
+        repeatMode: Int,
+    ) = edit {
         it[Keys.resumeQueue] = queue.joinToString(",")
         it[Keys.resumeIndex] = index.toString()
         it[Keys.resumePosition] = positionMs.toString()
+        it[Keys.resumeShuffle] = shuffle
+        it[Keys.resumeRepeat] = repeatMode
     }
 
     // ---- Folders & sorting -------------------------------------------------
@@ -269,8 +289,6 @@ class UserPreferences(private val context: Context) {
     /** Previous restarts the track instead of skipping back, when past the threshold. */
     val rewindOnPrevious: Flow<Boolean> = flow { it[Keys.rewindOnPrevious] ?: true }
 
-    val headsetAutoplay: Flow<Boolean> = flow { it[Keys.headsetAutoplay] ?: false }
-
     val rememberPlayback: Flow<Boolean> = flow { it[Keys.rememberPlayback] ?: true }
 
     val keepShuffle: Flow<Boolean> = flow { it[Keys.keepShuffle] ?: true }
@@ -286,8 +304,6 @@ class UserPreferences(private val context: Context) {
     suspend fun setPlayInListWith(mode: PlayInMode) = edit { it[Keys.playInListWith] = mode.name }
 
     suspend fun setRewindOnPrevious(value: Boolean) = edit { it[Keys.rewindOnPrevious] = value }
-
-    suspend fun setHeadsetAutoplay(value: Boolean) = edit { it[Keys.headsetAutoplay] = value }
 
     suspend fun setRememberPlayback(value: Boolean) = edit { it[Keys.rememberPlayback] = value }
 
@@ -330,14 +346,9 @@ class UserPreferences(private val context: Context) {
     /** Albums and artists as a grid, or as a denser list. */
     val gridView: Flow<Boolean> = flow { it[Keys.gridView] ?: true }
 
-    /** Trims silence at track boundaries, on top of ExoPlayer's native gapless handling. */
-    val skipSilence: Flow<Boolean> = flow { it[Keys.skipSilence] ?: false }
-
     suspend fun setAccent(colour: AccentColour) = edit { it[Keys.accent] = colour.name }
 
     suspend fun setGridView(value: Boolean) = edit { it[Keys.gridView] = value }
-
-    suspend fun setSkipSilence(value: Boolean) = edit { it[Keys.skipSilence] = value }
 
     suspend fun setThemeMode(mode: ThemeMode) = edit { it[Keys.themeMode] = mode.name }
 
