@@ -11,10 +11,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
 
 @Serializable
-private data class GenreFile(val genres: Map<String, String> = emptyMap())
+private data class GenreFile(
+    val genres: Map<String, String> = emptyMap(),
+    val songKeys: Map<String, String> = emptyMap(),
+)
 
 /**
  * User-assigned genres, keyed by song id.
@@ -30,7 +32,8 @@ private data class GenreFile(val genres: Map<String, String> = emptyMap())
 class GenreStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val file: File get() = File(context.filesDir, "genre-overrides.json")
+    private val file = AtomicTextFile(context.filesDir.resolve("genre-overrides.json"))
+    private var portable: Map<String, String> = emptyMap()
 
     private val _overrides = MutableStateFlow<Map<Long, String>>(emptyMap())
     val overrides: StateFlow<Map<Long, String>> = _overrides.asStateFlow()
@@ -39,33 +42,74 @@ class GenreStore(private val context: Context) {
     private val mutex = Mutex()
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        _overrides.value = runCatching {
-            if (!file.exists()) return@runCatching emptyMap()
-            json.decodeFromString<GenreFile>(file.readText())
-                .genres
-                .mapNotNull { (id, genre) -> id.toLongOrNull()?.let { it to genre } }
-                .toMap()
-        }.getOrElse { emptyMap() }
+        if (!file.exists) return@withContext
+        val stored = json.decodeFromString<GenreFile>(file.readText())
+        _overrides.value = stored.genres.mapNotNull { (id, genre) ->
+            id.toLongOrNull()?.let { it to genre }
+        }.toMap()
+        portable = stored.songKeys
     }
 
     /** Assigns [genre] to every song in [songIds]; a blank genre removes the assignment. */
-    suspend fun assign(songIds: Collection<Long>, genre: String) = withContext(Dispatchers.IO) {
-        if (songIds.isEmpty()) return@withContext
+    suspend fun assign(songs: Collection<Song>, genre: String) = withContext(Dispatchers.IO) {
+        if (songs.isEmpty()) return@withContext
         val trimmed = genre.trim()
         mutex.withLock {
-            _overrides.value = _overrides.value.toMutableMap().apply {
-                if (trimmed.isEmpty()) songIds.forEach(::remove)
-                else songIds.forEach { put(it, trimmed) }
+            val nextIds = _overrides.value.toMutableMap().apply {
+                if (trimmed.isEmpty()) songs.forEach { remove(it.id) }
+                else songs.forEach { put(it.id, trimmed) }
             }
-            persist()
+            val nextKeys = portable.toMutableMap().apply {
+                if (trimmed.isEmpty()) songs.forEach { remove(it.stableKey) }
+                else songs.forEach { put(it.stableKey, trimmed) }
+            }
+            persist(nextIds, nextKeys)
+            _overrides.value = nextIds
+            portable = nextKeys
         }
     }
 
-    private fun persist() {
-        runCatching {
-            file.writeText(
-                json.encodeToString(GenreFile(_overrides.value.mapKeys { it.key.toString() }))
-            )
+    /** Resolves portable keys and upgrades legacy MediaStore-id entries after each scan. */
+    suspend fun reconcile(songs: List<Song>) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val byId = songs.associateBy { it.id }
+            val byKey = songs.associateBy { it.stableKey }
+            val resolved = mutableMapOf<Long, String>()
+            val keys = portable.toMutableMap()
+            for ((key, genre) in portable) byKey[key]?.let { resolved[it.id] = genre }
+            for ((id, genre) in _overrides.value) {
+                byId[id]?.let {
+                    resolved[it.id] = genre
+                    keys.putIfAbsent(it.stableKey, genre)
+                }
+            }
+            if (resolved != _overrides.value || keys != portable) {
+                persist(resolved, keys)
+                _overrides.value = resolved
+                portable = keys
+            }
         }
+    }
+
+    suspend fun replacePortable(values: Map<String, String>, songs: List<Song>) =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val byKey = songs.associateBy { it.stableKey }
+                val ids = values.mapNotNull { (key, genre) -> byKey[key]?.let { it.id to genre } }.toMap()
+                persist(ids, values)
+                _overrides.value = ids
+                portable = values
+            }
+        }
+
+    private fun persist(ids: Map<Long, String>, keys: Map<String, String>) {
+        file.writeText(
+            json.encodeToString(
+                GenreFile(
+                    genres = ids.mapKeys { it.key.toString() },
+                    songKeys = keys,
+                )
+            )
+        )
     }
 }

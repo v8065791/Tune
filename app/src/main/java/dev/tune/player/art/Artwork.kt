@@ -10,6 +10,7 @@ import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.key.Keyer
 import coil.request.Options
+import coil.size.Dimension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -45,7 +46,7 @@ class ArtFetcher(
             runCatching { File(path).takeIf { it.exists() }?.readBytes() }.getOrNull()
         } ?: data.audioPath?.let(::embeddedPicture) ?: return@withContext null
 
-        val bitmap = decodeScaled(bytes) ?: return@withContext null
+        val bitmap = decodeScaled(bytes, requestedPixels()) ?: return@withContext null
         DrawableResult(
             drawable = BitmapDrawable(options.context.resources, bitmap),
             isSampled = true,
@@ -71,7 +72,7 @@ class ArtFetcher(
      * Covers are frequently far larger than the view showing them, so decode bounds first and
      * subsample. Without this, a grid of 1400x1400 covers will churn through memory.
      */
-    private fun decodeScaled(bytes: ByteArray): android.graphics.Bitmap? {
+    private fun decodeScaled(bytes: ByteArray, targetPx: Int): android.graphics.Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
 
@@ -80,12 +81,20 @@ class ArtFetcher(
         // loader's calculation — these two must agree or one of them is wrong.
         var sample = 1
         val longest = maxOf(bounds.outWidth, bounds.outHeight)
-        while (longest / sample > TARGET_PX) {
+        while (longest / sample > targetPx) {
             sample *= 2
         }
 
         val decode = BitmapFactory.Options().apply { inSampleSize = sample }
         return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decode) }.getOrNull()
+    }
+
+    private fun requestedPixels(): Int {
+        fun Dimension.pixels() = (this as? Dimension.Pixels)?.px
+        return maxOf(
+            options.size.width.pixels() ?: DEFAULT_TARGET_PX,
+            options.size.height.pixels() ?: DEFAULT_TARGET_PX,
+        ).coerceIn(MIN_TARGET_PX, MAX_TARGET_PX)
     }
 
     class Factory : Fetcher.Factory<ArtRequest> {
@@ -94,6 +103,8 @@ class ArtFetcher(
     }
 
     private companion object {
-        const val TARGET_PX = 512
+        const val DEFAULT_TARGET_PX = 512
+        const val MIN_TARGET_PX = 96
+        const val MAX_TARGET_PX = 1_024
     }
 }

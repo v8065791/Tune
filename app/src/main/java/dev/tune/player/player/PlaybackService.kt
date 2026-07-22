@@ -14,12 +14,13 @@ import androidx.media3.session.MediaSessionService
  * Hosts the ExoPlayer instance and publishes it as a MediaSession, which is what drives the
  * notification, lockscreen controls, Bluetooth buttons and Android Auto.
  */
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private var artworkLoader: EmbeddedArtworkBitmapLoader? = null
 
     // ExoPlayer's builder surface is annotated @UnstableApi; opting in keeps lint quiet.
-    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
 
@@ -35,14 +36,19 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        val loader = EmbeddedArtworkBitmapLoader()
+        artworkLoader = loader
         mediaSession = MediaSession.Builder(this, player)
             // Cover art has to be resolved from the file's own tags; see the loader for why the
             // MediaStore albumart URI this used to rely on never worked.
-            .setBitmapLoader(CacheBitmapLoader(EmbeddedArtworkBitmapLoader()))
+            .setBitmapLoader(CacheBitmapLoader(loader))
             .build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        mediaSession.takeIf {
+            controllerInfo.packageName == packageName || controllerInfo.isTrusted
+        }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Swiping the app away while paused should not leave a dead notification behind.
@@ -58,6 +64,8 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         mediaSession = null
+        artworkLoader?.close()
+        artworkLoader = null
         super.onDestroy()
     }
 }

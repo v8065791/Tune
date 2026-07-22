@@ -29,7 +29,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,8 +46,9 @@ import dev.tune.player.data.FolderMode
  */
 @Composable
 fun FolderPickerScreen(vm: MainViewModel, onBack: () -> Unit) {
-    val folders by vm.excludedFolders.collectAsState()
-    val mode by vm.folderMode.collectAsState()
+    val folders by vm.excludedFolders.collectAsStateWithLifecycle()
+    val mode by vm.folderMode.collectAsStateWithLifecycle()
+    val allFolders by vm.allFolders.collectAsStateWithLifecycle()
 
     val pickDirectory = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -143,7 +144,7 @@ fun FolderPickerScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             // Discovered folders make it easy to add one without going through the file picker.
             item { SuggestionHeader() }
-            items(vm.allFolders.value.map { it.path }.filterNot { it in folders }, key = { "s-$it" }) { path ->
+            items(allFolders.map { it.path }.filterNot { it in folders }, key = { "s-$it" }) { path ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

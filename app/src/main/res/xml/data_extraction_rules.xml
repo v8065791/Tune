@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="artwork-overrides.json" />
+        <exclude domain="file" path="artwork/" />
+        <exclude domain="file" path="release-dates.json" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="artwork-overrides.json" />
+        <exclude domain="file" path="artwork/" />
+        <exclude domain="file" path="release-dates.json" />
+    </device-transfer>
+</data-extraction-rules>

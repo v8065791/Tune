@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
@@ -41,7 +43,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,12 +55,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.tune.player.data.NameCollator
+import dev.tune.player.data.Album
 import dev.tune.player.data.Song
 import dev.tune.player.data.SortOrder
 import dev.tune.player.data.comparator
 import dev.tune.player.ui.MainViewModel
 import dev.tune.player.ui.components.Artwork
 import dev.tune.player.ui.components.EmptyState
+import dev.tune.player.ui.components.ListCard
 import dev.tune.player.ui.components.SelectableSongRow
 import dev.tune.player.ui.components.SelectionTopBar
 import dev.tune.player.ui.components.formatDuration
@@ -72,10 +76,10 @@ import dev.tune.player.ui.components.formatDuration
  */
 @Composable
 private fun sortedForDetail(vm: MainViewModel, songs: List<Song>): List<Song> {
-    val order by vm.detailSort.collectAsState()
-    val descending by vm.detailSortDescending.collectAsState()
-    val ignoreArticles by vm.autoSortNames.collectAsState()
-    val stats by vm.playStats.collectAsState()
+    val order by vm.detailSort.collectAsStateWithLifecycle()
+    val descending by vm.detailSortDescending.collectAsStateWithLifecycle()
+    val ignoreArticles by vm.autoSortNames.collectAsStateWithLifecycle()
+    val stats by vm.playStats.collectAsStateWithLifecycle()
 
     return remember(songs, order, descending, ignoreArticles, stats) {
         val comparator = order?.comparator(NameCollator(ignoreArticles), stats, descending)
@@ -92,8 +96,8 @@ private fun sortedForDetail(vm: MainViewModel, songs: List<Song>): List<Song> {
  */
 @Composable
 private fun SongsHeader(vm: MainViewModel, count: Int) {
-    val order by vm.detailSort.collectAsState()
-    val descending by vm.detailSortDescending.collectAsState()
+    val order by vm.detailSort.collectAsStateWithLifecycle()
+    val descending by vm.detailSortDescending.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
 
     Row(
@@ -215,10 +219,10 @@ fun AlbumDetailScreen(
     onSelectionSetGenre: () -> Unit,
 ) {
     // Re-read from the library flow so the screen follows rescans and folder changes.
-    val library by vm.library.collectAsState()
-    val overrides by vm.artworkOverrides.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val overrides by vm.artworkOverrides.collectAsStateWithLifecycle()
     val album = library.albums.firstOrNull { it.id == albumId }
-    val playerState by vm.playerState.collectAsState()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
 
     if (album == null) {
         MissingScreen("Album not found", onBack)
@@ -261,14 +265,15 @@ fun ArtistDetailScreen(
     artistId: Long,
     vm: MainViewModel,
     onBack: () -> Unit,
+    onAlbumClick: (Album) -> Unit,
     onSongMenu: (Song) -> Unit,
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
 ) {
-    val library by vm.library.collectAsState()
-    val overrides by vm.artworkOverrides.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val overrides by vm.artworkOverrides.collectAsStateWithLifecycle()
     val artist = library.artists.firstOrNull { it.id == artistId }
-    val playerState by vm.playerState.collectAsState()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
 
     if (artist == null) {
         MissingScreen("Artist not found", onBack)
@@ -299,6 +304,11 @@ fun ArtistDetailScreen(
         onSongMenu = onSongMenu,
         onSelectionToPlaylist = onSelectionToPlaylist,
         onSelectionSetGenre = onSelectionSetGenre,
+        albumSections = listOf(
+            "Albums" to artist.albums,
+            "Appears on" to artist.appearsOn,
+        ).filter { it.second.isNotEmpty() },
+        onAlbumClick = onAlbumClick,
     )
 }
 
@@ -311,10 +321,10 @@ fun PlaylistDetailScreen(
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
 ) {
-    val playlists by vm.playlists.collectAsState()
-    val library by vm.library.collectAsState()
-    val playerState by vm.playerState.collectAsState()
-    val selection by vm.selection.collectAsState()
+    val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
+    val selection by vm.selection.collectAsStateWithLifecycle()
     val selecting = selection.isNotEmpty()
     val playlist = playlists.firstOrNull { it.id == playlistId }
 
@@ -326,6 +336,9 @@ fun PlaylistDetailScreen(
     // Recomputed against `library` so songs removed from disk disappear from the playlist view.
     val songs = remember(playlist, library) { vm.songsOf(playlist) }
     val ordered = sortedForDetail(vm, songs)
+    val exportPlaylist = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("audio/x-mpegurl")
+    ) { uri -> uri?.let { vm.exportPlaylist(it, playlist) } }
 
     Scaffold(
         topBar = {
@@ -339,6 +352,9 @@ fun PlaylistDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { exportPlaylist.launch("${playlist.name}.m3u8") }) {
+                        Icon(Icons.Default.FileUpload, contentDescription = "Export playlist")
+                    }
                     IconButton(onClick = { vm.deletePlaylist(playlist.id); onBack() }) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete playlist")
                     }
@@ -383,9 +399,9 @@ fun GenreDetailScreen(
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
 ) {
-    val library by vm.library.collectAsState()
-    val playerState by vm.playerState.collectAsState()
-    val selection by vm.selection.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
+    val selection by vm.selection.collectAsStateWithLifecycle()
     val selecting = selection.isNotEmpty()
     val genre = library.genres.firstOrNull { it.id == genreId }
 
@@ -443,9 +459,9 @@ fun FolderDetailScreen(
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
 ) {
-    val library by vm.library.collectAsState()
-    val playerState by vm.playerState.collectAsState()
-    val selection by vm.selection.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
+    val selection by vm.selection.collectAsStateWithLifecycle()
     val selecting = selection.isNotEmpty()
     val songs = remember(folderPath, library) { vm.songsInFolder(folderPath) }
     val ordered = sortedForDetail(vm, songs)
@@ -525,10 +541,12 @@ private fun DetailScaffold(
     onSongMenu: (Song) -> Unit,
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
+    albumSections: List<Pair<String, List<Album>>> = emptyList(),
+    onAlbumClick: (Album) -> Unit = {},
 ) {
     val ordered = sortedForDetail(vm, songs)
-    val reordered = vm.detailSort.collectAsState().value != null
-    val selection by vm.selection.collectAsState()
+    val reordered = vm.detailSort.collectAsStateWithLifecycle().value != null
+    val selection by vm.selection.collectAsStateWithLifecycle()
     val selecting = selection.isNotEmpty()
 
     Scaffold(
@@ -574,6 +592,27 @@ private fun DetailScaffold(
                     )
 
                     PlayButtons(onPlay = onPlay, onShuffle = onShuffle)
+                }
+            }
+
+            albumSections.forEach { (label, albums) ->
+                item {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                    )
+                }
+                items(albums, key = { "$label-${it.id}" }) { album ->
+                    ListCard(
+                        art = vm.artForAlbum(album),
+                        title = album.name,
+                        subtitle = if (album.year > 0) "${album.artist} · ${album.year}" else album.artist,
+                        rounded = false,
+                        onClick = { onAlbumClick(album) },
+                    )
                 }
             }
 

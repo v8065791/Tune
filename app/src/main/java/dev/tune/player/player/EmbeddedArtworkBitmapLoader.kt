@@ -10,6 +10,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.ListeningExecutorService
 import com.google.common.util.concurrent.MoreExecutors
 import java.io.File
+import java.io.Closeable
 import java.util.concurrent.Executors
 
 /**
@@ -28,7 +29,7 @@ import java.util.concurrent.Executors
  * matching the in-app placeholder rather than showing a stale cover from another track.
  */
 @UnstableApi
-class EmbeddedArtworkBitmapLoader : BitmapLoader {
+class EmbeddedArtworkBitmapLoader : BitmapLoader, Closeable {
 
     // Extraction is blocking file I/O. One thread is plenty — only the current item is ever
     // requested, and CacheBitmapLoader wraps this so repeats don't hit the disk again.
@@ -77,6 +78,10 @@ class EmbeddedArtworkBitmapLoader : BitmapLoader {
 
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
         return BitmapFactory.decodeByteArray(data, 0, data.size, options)
+    }
+
+    override fun close() {
+        executor.shutdownNow()
     }
 
     private companion object {

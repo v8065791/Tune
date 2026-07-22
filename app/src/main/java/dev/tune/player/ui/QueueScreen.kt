@@ -21,8 +21,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,12 +43,12 @@ import dev.tune.player.ui.components.formatDuration
  */
 @Composable
 fun QueueScreen(vm: MainViewModel, onBack: () -> Unit) {
-    val state by vm.playerState.collectAsState()
-    val library by vm.library.collectAsState()
+    val state by vm.playerState.collectAsStateWithLifecycle()
+    val library by vm.library.collectAsStateWithLifecycle()
 
     // Resolve ids per position — the same song can legitimately appear twice in a queue.
-    val byId = library.songs.associateBy { it.id }
-    val entries = state.queueIds.map { byId[it] }
+    val byId = remember(library.songs) { library.songs.associateBy { it.id } }
+    val entries = remember(state.queueIds, byId) { state.queueIds.map { byId[it] } }
 
     Scaffold(
         topBar = {
@@ -67,7 +68,7 @@ fun QueueScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
-            itemsIndexed(entries) { index, song ->
+            itemsIndexed(entries, key = { index, song -> "${song?.id ?: "missing"}-$index" }) { index, song ->
                 val playing = index == state.queueIndex
 
                 Row(

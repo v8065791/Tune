@@ -2,6 +2,8 @@ package dev.tune.player.ui
 
 import android.content.Intent
 import android.media.audiofx.AudioEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,7 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,12 +96,37 @@ fun LibrarySettingsScreen(
     onOpenFolders: () -> Unit,
     onOpenDuplicates: () -> Unit,
 ) {
+    val exportBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { it?.let(vm::exportBackup) }
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        it?.let(vm::importBackup)
+    }
+    val importPlaylist = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        it?.let(vm::importPlaylist)
+    }
+
     SettingsScaffold(title = "Library", onBack = onBack) {
         item {
             ActionRow("Music folders", "Choose which folders are scanned", onOpenFolders)
         }
         item {
-            val duplicates by vm.duplicates.collectAsState()
+            ActionRow("Export Tune backup", "Save playlists, favourites, genres and play history") {
+                exportBackup.launch("tune-v3.5-backup.json")
+            }
+        }
+        item {
+            ActionRow("Import Tune backup", "Restore a Tune JSON backup") {
+                importBackup.launch(arrayOf("application/json", "text/json"))
+            }
+        }
+        item {
+            ActionRow("Import M3U playlist", "Match playlist paths against this music library") {
+                importPlaylist.launch(arrayOf("audio/x-mpegurl", "application/vnd.apple.mpegurl", "text/*"))
+            }
+        }
+        item {
+            val duplicates by vm.duplicates.collectAsStateWithLifecycle()
             ActionRow(
                 title = "Find duplicates",
                 subtitle = if (duplicates.isEmpty()) "No duplicate tracks found"
@@ -108,7 +135,7 @@ fun LibrarySettingsScreen(
             )
         }
         item {
-            val observing by vm.observing.collectAsState()
+            val observing by vm.observing.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Watch for changes",
                 subtitle = "Rescan automatically when the system media library changes",
@@ -116,7 +143,7 @@ fun LibrarySettingsScreen(
             ) { value -> vm.edit { setObserving(value) } }
         }
         item {
-            val autoSort by vm.autoSortNames.collectAsState()
+            val autoSort by vm.autoSortNames.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Ignore leading articles",
                 subtitle = "Sort \"The Beatles\" under B",
@@ -124,7 +151,7 @@ fun LibrarySettingsScreen(
             ) { value -> vm.edit { setAutoSortNames(value) } }
         }
         item {
-            val hide by vm.hideCollaborators.collectAsState()
+            val hide by vm.hideCollaborators.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Separate collaborations",
                 subtitle = "List albums an artist only appears on apart from their own",
@@ -132,7 +159,7 @@ fun LibrarySettingsScreen(
             ) { value -> vm.edit { setHideCollaborators(value) } }
         }
         item {
-            val separators by vm.separators.collectAsState()
+            val separators by vm.separators.collectAsStateWithLifecycle()
             SeparatorsRow(separators) { value -> vm.edit { setSeparators(value) } }
         }
     }
@@ -142,7 +169,7 @@ fun LibrarySettingsScreen(
 fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     SettingsScaffold(title = "Playback", onBack = onBack) {
         item {
-            val mode by vm.playInListWith.collectAsState()
+            val mode by vm.playInListWith.collectAsStateWithLifecycle()
             ChoiceRow(
                 title = "Tapping a song plays",
                 current = mode,
@@ -151,7 +178,7 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             ) { value -> vm.edit { setPlayInListWith(value) } }
         }
         item {
-            val rewind by vm.rewindOnPrevious.collectAsState()
+            val rewind by vm.rewindOnPrevious.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Previous restarts the track",
                 subtitle = "Skip back only when near the start",
@@ -159,7 +186,7 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             ) { value -> vm.edit { setRewindOnPrevious(value) } }
         }
         item {
-            val remember by vm.rememberPlayback.collectAsState()
+            val remember by vm.rememberPlayback.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Remember playback",
                 subtitle = "Restore the queue and position on next launch",
@@ -167,7 +194,7 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             ) { value -> vm.edit { setRememberPlayback(value) } }
         }
         item {
-            val keep by vm.keepShuffle.collectAsState()
+            val keep by vm.keepShuffle.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Remember shuffle",
                 subtitle = "Keep shuffle enabled between sessions",
@@ -175,7 +202,7 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             ) { value -> vm.edit { setKeepShuffle(value) } }
         }
         item {
-            val gain by vm.replayGain.collectAsState()
+            val gain by vm.replayGain.collectAsStateWithLifecycle()
             ChoiceRow(
                 title = "ReplayGain",
                 current = gain,
@@ -186,7 +213,8 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         item {
             Text(
                 text = "Reads the gain tag written by tools like foobar2000 or rsgain, in MP3, " +
-                    "FLAC, Ogg Vorbis and Opus. Opus R128 tags are converted to the same scale. " +
+                    "FLAC, Ogg Vorbis, Opus, M4A and ALAC. Opus R128 tags are converted to the " +
+                    "same scale. " +
                     "Quiet tracks are only boosted as far as the peak tag says is safe; without " +
                     "one they are left alone rather than risking clipping.",
                 style = MaterialTheme.typography.bodySmall,
@@ -219,7 +247,7 @@ fun PlaybackSettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTabs: () -> Unit) {
     SettingsScaffold(title = "Appearance", onBack = onBack) {
         item {
-            val tabs by vm.homeTabs.collectAsState()
+            val tabs by vm.homeTabs.collectAsStateWithLifecycle()
             ActionRow(
                 title = "Home tabs",
                 subtitle = tabs.joinToString(", ") { it.label },
@@ -227,7 +255,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             )
         }
         item {
-            val grid by vm.gridView.collectAsState()
+            val grid by vm.gridView.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Grid layout",
                 subtitle = "Show tabs as cards instead of rows. The toolbar toggles this too.",
@@ -235,7 +263,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.setGridView(value) }
         }
         item {
-            val theme by vm.themeMode.collectAsState()
+            val theme by vm.themeMode.collectAsStateWithLifecycle()
             ChoiceRow(
                 title = "Theme",
                 current = theme,
@@ -244,7 +272,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setThemeMode(value) } }
         }
         item {
-            val black by vm.blackTheme.collectAsState()
+            val black by vm.blackTheme.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Black dark theme",
                 subtitle = "True black backgrounds for OLED screens",
@@ -252,8 +280,8 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setBlackTheme(value) } }
         }
         item {
-            val accent by vm.accent.collectAsState()
-            val dynamicOn by vm.dynamicColor.collectAsState()
+            val accent by vm.accent.collectAsStateWithLifecycle()
+            val dynamicOn by vm.dynamicColor.collectAsStateWithLifecycle()
             ChoiceRow(
                 title = "Accent colour",
                 // Material You supplies its own accent, so this only applies when it's off.
@@ -263,7 +291,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setAccent(value) } }
         }
         item {
-            val dynamic by vm.dynamicColor.collectAsState()
+            val dynamic by vm.dynamicColor.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Material You colours",
                 subtitle = "Take the accent colour from your wallpaper",
@@ -271,7 +299,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setDynamicColor(value) } }
         }
         item {
-            val cover by vm.coverMode.collectAsState()
+            val cover by vm.coverMode.collectAsStateWithLifecycle()
             ChoiceRow(
                 title = "Cover art source",
                 current = cover,
@@ -280,7 +308,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setCoverMode(value) } }
         }
         item {
-            val square by vm.squareCovers.collectAsState()
+            val square by vm.squareCovers.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Square covers",
                 subtitle = "Crop artwork to a square instead of keeping its aspect ratio",
@@ -288,7 +316,7 @@ fun AppearanceSettingsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenHomeTa
             ) { value -> vm.edit { setSquareCovers(value) } }
         }
         item {
-            val rounded by vm.roundedCorners.collectAsState()
+            val rounded by vm.roundedCorners.collectAsStateWithLifecycle()
             SwitchRow(
                 title = "Rounded corners",
                 subtitle = "Round the corners of artwork",

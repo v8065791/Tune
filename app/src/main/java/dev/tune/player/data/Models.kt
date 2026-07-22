@@ -1,9 +1,12 @@
 package dev.tune.player.data
 
 import android.content.ContentUris
+import android.annotation.SuppressLint
 import android.net.Uri
 import android.provider.MediaStore
 import kotlinx.serialization.Serializable
+import java.security.MessageDigest
+import java.util.Locale
 
 /**
  * One audio file, as read from MediaStore. [path] is the real filesystem path, which is what
@@ -33,6 +36,8 @@ data class Song(
     val dateAddedSeconds: Long,
     val dateModifiedSeconds: Long,
     val path: String,
+    /** Stable across MediaStore database rebuilds and devices with the same relative file layout. */
+    val stableKey: String = stableSongKey(path, sizeBytes, durationMs),
 ) {
     /** Absolute path of the directory holding this file, without a trailing separator. */
     val folderPath: String get() = path.substringBeforeLast('/', "")
@@ -97,7 +102,31 @@ data class Playlist(
     val id: String,
     val name: String,
     val songIds: List<Long> = emptyList(),
+    /** Portable identities; [songIds] remains the fast runtime projection for the current device. */
+    val songKeys: List<String> = emptyList(),
 )
+
+/**
+ * A portable song identity based on its path below the storage volume plus coarse file traits.
+ *
+ * MediaStore ids are database row ids and can point at different songs after a restore. Removing
+ * `/storage/<volume>/` keeps the key useful when the same library moves between internal storage
+ * and an SD card. The full key is hashed so it is safe in DataStore sets and exported JSON.
+ */
+@SuppressLint("SdCardPath") // `/sdcard` can occur in persisted MediaStore DATA on older devices.
+internal fun stableSongKey(path: String, sizeBytes: Long, durationMs: Long): String {
+    val clean = path.replace('\\', '/').trimEnd('/')
+    val relative = when {
+        clean.startsWith("/storage/emulated/") ->
+            clean.removePrefix("/storage/emulated/").substringAfter('/', "")
+        clean.startsWith("/storage/") -> clean.removePrefix("/storage/").substringAfter('/', "")
+        clean.startsWith("/sdcard/") -> clean.removePrefix("/sdcard/")
+        else -> clean.removePrefix("/")
+    }.lowercase(Locale.ROOT)
+    val payload = "$relative\u0000$sizeBytes\u0000${durationMs / 1_000L}"
+    val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+    return "v1:" + digest.take(16).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+}
 
 /** Everything the UI renders, rebuilt whenever the library is rescanned or folders change. */
 data class Library(

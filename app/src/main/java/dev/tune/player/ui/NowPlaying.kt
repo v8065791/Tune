@@ -29,13 +29,15 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +64,7 @@ fun MiniPlayer(
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val progressState by vm.playbackProgress.collectAsStateWithLifecycle()
     Column(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -70,8 +73,8 @@ fun MiniPlayer(
             .navigationBarsPadding()
     ) {
         // Thin progress line — cheaper to read at a glance than a full slider.
-        val progress = if (state.durationMs > 0) {
-            (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+        val progress = if (progressState.durationMs > 0) {
+            (progressState.positionMs.toFloat() / progressState.durationMs).coerceIn(0f, 1f)
         } else 0f
         Box(
             Modifier
@@ -141,6 +144,9 @@ fun NowPlayingScreen(
 ) {
     // While the user drags, show their position rather than the player's, or the thumb fights back.
     var scrubPosition by remember { mutableStateOf<Float?>(null) }
+    var showSleepTimer by remember { mutableStateOf(false) }
+    val progress by vm.playbackProgress.collectAsStateWithLifecycle()
+    val sleepRemaining by vm.sleepRemainingMs.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -154,7 +160,7 @@ fun NowPlayingScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Spacer(Modifier.weight(1f))
-            val favourites by vm.favourites.collectAsState()
+            val favourites by vm.favourites.collectAsStateWithLifecycle()
             val isFavourite = song.id in favourites
             IconButton(onClick = { vm.toggleFavourite(song) }) {
                 Icon(
@@ -175,6 +181,14 @@ fun NowPlayingScreen(
                 Icon(
                     Icons.AutoMirrored.Filled.QueueMusic,
                     contentDescription = "Queue (${state.queueSize} tracks)",
+                )
+            }
+            IconButton(onClick = { showSleepTimer = true }) {
+                Icon(
+                    Icons.Default.Timer,
+                    contentDescription = "Sleep timer",
+                    tint = if (sleepRemaining != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             IconButton(onClick = { vm.showMetadata(song) }) {
@@ -212,8 +226,8 @@ fun NowPlayingScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        val duration = state.durationMs.takeIf { it > 0 } ?: song.durationMs
-        val position = scrubPosition ?: state.positionMs.toFloat()
+        val duration = progress.durationMs.takeIf { it > 0 } ?: song.durationMs
+        val position = scrubPosition ?: progress.positionMs.toFloat()
         Slider(
             value = position.coerceIn(0f, duration.toFloat()),
             onValueChange = { scrubPosition = it },
@@ -282,6 +296,42 @@ fun NowPlayingScreen(
         }
 
         SpeedControl(speed = state.speed, onSelect = vm::setSpeed)
+    }
+
+    if (showSleepTimer) {
+        AlertDialog(
+            onDismissRequest = { showSleepTimer = false },
+            title = { Text("Sleep timer") },
+            text = {
+                Column {
+                    sleepRemaining?.let {
+                        Text("Pausing in ${(it / 60_000L).coerceAtLeast(1L)} minutes")
+                    }
+                    listOf(15, 30, 45, 60, 90).forEach { minutes ->
+                        TextButton(
+                            onClick = {
+                                vm.setSleepTimer(minutes)
+                                showSleepTimer = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("$minutes minutes") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSleepTimer = false }) { Text("Close") }
+            },
+            dismissButton = sleepRemaining?.let {
+                {
+                    TextButton(
+                        onClick = {
+                            vm.setSleepTimer(null)
+                            showSleepTimer = false
+                        }
+                    ) { Text("Cancel timer") }
+                }
+            },
+        )
     }
 }
 

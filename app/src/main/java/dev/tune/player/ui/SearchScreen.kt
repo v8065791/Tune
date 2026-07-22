@@ -24,7 +24,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -53,9 +53,9 @@ fun SearchScreen(
     onGenreClick: (Genre) -> Unit,
     onSongMenu: (Song) -> Unit,
 ) {
-    val query by vm.searchQuery.collectAsState()
-    val results by vm.searchResults.collectAsState()
-    val playerState by vm.playerState.collectAsState()
+    val query by vm.searchQuery.collectAsStateWithLifecycle()
+    val results by vm.searchResults.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
 
     // Opening search should put the caret in the field — nobody navigates here to browse.
