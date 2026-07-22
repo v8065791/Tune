@@ -10,7 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,11 +63,11 @@ private object Routes {
 @Composable
 fun TuneApp(vm: MainViewModel) {
     val navController = rememberNavController()
-    val playerState by vm.playerState.collectAsState()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
 
     // Surface failures (e.g. an unreadable picked image) instead of leaving the user guessing.
     val context = LocalContext.current
-    val message by vm.messages.collectAsState()
+    val message by vm.messages.collectAsStateWithLifecycle()
     LaunchedEffect(message) {
         message?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -75,8 +75,8 @@ fun TuneApp(vm: MainViewModel) {
         }
     }
 
-    val playlists by vm.playlists.collectAsState()
-    val metadataSong by vm.metadataSong.collectAsState()
+    val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val metadataSong by vm.metadataSong.collectAsStateWithLifecycle()
 
     // Sheet + dialog state, hoisted here so any screen can trigger them.
     var actionsSong by remember { mutableStateOf<Song?>(null) }
@@ -86,7 +86,7 @@ fun TuneApp(vm: MainViewModel) {
     var playlistPickerForSelection by remember { mutableStateOf(false) }
     var genreForSong by remember { mutableStateOf<Song?>(null) }
     var genreForSelection by remember { mutableStateOf(false) }
-    val library by vm.library.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
 
     // The mini player lives above the NavHost rather than inside any one screen, so it stays put
     // while navigating. The now playing screen is the exception — it already shows the controls.
@@ -232,6 +232,7 @@ fun TuneApp(vm: MainViewModel) {
                 artistId = entry.arguments?.getLong("artistId") ?: 0L,
                 vm = vm,
                 onBack = { navController.popBackStack() },
+                onAlbumClick = { navController.navigate(Routes.album(it.id)) },
                 onSongMenu = { actionsSong = it },
                 onSelectionToPlaylist = { playlistPickerForSelection = true },
                 onSelectionSetGenre = { genreForSelection = true },
@@ -307,7 +308,7 @@ fun TuneApp(vm: MainViewModel) {
 
     // Assigning a genre stores it in Tune's own data; the audio file is not touched.
     genreForSong?.let { song ->
-        val suggestions by vm.knownGenres.collectAsState()
+        val suggestions by vm.knownGenres.collectAsStateWithLifecycle()
         GenreDialog(
             songCount = 1,
             current = song.genre.orEmpty(),
@@ -321,8 +322,8 @@ fun TuneApp(vm: MainViewModel) {
     }
 
     if (genreForSelection) {
-        val suggestions by vm.knownGenres.collectAsState()
-        val selection by vm.selection.collectAsState()
+        val suggestions by vm.knownGenres.collectAsStateWithLifecycle()
+        val selection by vm.selection.collectAsStateWithLifecycle()
         GenreDialog(
             songCount = selection.size,
             current = "",

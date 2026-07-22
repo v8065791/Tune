@@ -3,6 +3,7 @@ package dev.tune.player.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import java.io.File
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -10,8 +11,10 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import dev.tune.player.data.Song
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,8 +25,6 @@ import kotlinx.coroutines.launch
 data class PlayerState(
     val currentSongId: Long? = null,
     val isPlaying: Boolean = false,
-    val positionMs: Long = 0L,
-    val durationMs: Long = 0L,
     val shuffle: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val queueSize: Int = 0,
@@ -33,6 +34,9 @@ data class PlayerState(
     val speed: Float = 1f,
 )
 
+/** Frequently changing playback position, isolated so queue and library screens stay still. */
+data class PlaybackProgress(val positionMs: Long = 0L, val durationMs: Long = 0L)
+
 /**
  * Wraps the [MediaController] connection to [PlaybackService] and mirrors playback into a
  * [StateFlow]. Every call is a no-op until the connection lands, so the UI can bind immediately.
@@ -40,9 +44,18 @@ data class PlayerState(
 class PlayerController(private val context: Context, private val scope: CoroutineScope) {
 
     private var controller: MediaController? = null
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var pollJob: Job? = null
+    private var sleepJob: Job? = null
 
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
+
+    private val _progress = MutableStateFlow(PlaybackProgress())
+    val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
+
+    private val _sleepRemainingMs = MutableStateFlow<Long?>(null)
+    val sleepRemainingMs: StateFlow<Long?> = _sleepRemainingMs.asStateFlow()
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = syncState()
@@ -52,7 +65,9 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         if (controller != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
+        controllerFuture = future
         future.addListener({
+            if (controllerFuture !== future) return@addListener
             controller = runCatching { future.get() }.getOrNull()?.also {
                 it.addListener(listener)
                 syncState()
@@ -60,15 +75,21 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         }, ContextCompat.getMainExecutor(context))
 
         // The player reports position only on demand, so poll while something is playing.
-        scope.launch {
+        pollJob = scope.launch {
             while (true) {
-                if (_state.value.isPlaying) syncState()
+                if (_state.value.isPlaying) syncProgress()
                 delay(POSITION_POLL_MS)
             }
         }
     }
 
     fun release() {
+        pollJob?.cancel()
+        pollJob = null
+        sleepJob?.cancel()
+        sleepJob = null
+        controllerFuture?.cancel(true)
+        controllerFuture = null
         controller?.removeListener(listener)
         controller?.release()
         controller = null
@@ -124,8 +145,6 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         _state.value = PlayerState(
             currentSongId = player.currentMediaItem?.mediaId?.toLongOrNull(),
             isPlaying = player.isPlaying,
-            positionMs = player.currentPosition.coerceAtLeast(0L),
-            durationMs = player.duration.takeIf { it > 0 } ?: 0L,
             shuffle = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
             queueSize = player.mediaItemCount,
@@ -134,6 +153,15 @@ class PlayerController(private val context: Context, private val scope: Coroutin
                 player.getMediaItemAt(it).mediaId.toLongOrNull()
             },
             speed = player.playbackParameters.speed,
+        )
+        syncProgress()
+    }
+
+    private fun syncProgress() {
+        val player = controller ?: return
+        _progress.value = PlaybackProgress(
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+            durationMs = player.duration.takeIf { it > 0 } ?: 0L,
         )
     }
 
@@ -195,6 +223,29 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         player.play()
     }
 
+    /** Pauses playback after [durationMs], using elapsed time so wall-clock changes do not affect it. */
+    fun setSleepTimer(durationMs: Long?) {
+        sleepJob?.cancel()
+        sleepJob = null
+        if (durationMs == null || durationMs <= 0L) {
+            _sleepRemainingMs.value = null
+            return
+        }
+        val deadline = SystemClock.elapsedRealtime() + durationMs
+        _sleepRemainingMs.value = durationMs
+        sleepJob = scope.launch {
+            while (true) {
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining <= 0L) break
+                _sleepRemainingMs.value = remaining
+                delay(minOf(SLEEP_TICK_MS, remaining))
+            }
+            controller?.pause()
+            _sleepRemainingMs.value = null
+            sleepJob = null
+        }
+    }
+
     private fun toMediaItem(song: Song): MediaItem =
         MediaItem.Builder()
             .setMediaId(song.id.toString())
@@ -223,5 +274,6 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         const val RESTART_THRESHOLD_MS = 3_000L
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 3.0f
+        const val SLEEP_TICK_MS = 1_000L
     }
 }

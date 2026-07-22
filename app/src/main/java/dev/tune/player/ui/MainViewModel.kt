@@ -36,6 +36,7 @@ import dev.tune.player.data.ThemeMode
 import dev.tune.player.data.UserPreferences
 import androidx.media3.common.Player
 import dev.tune.player.player.PlayerController
+import dev.tune.player.player.PlaybackProgress
 import dev.tune.player.player.PlayerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -67,6 +68,15 @@ data class SearchResults(
         get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && genres.isEmpty()
 }
 
+private data class SearchEntry<T>(val value: T, val text: String)
+
+private data class SearchIndex(
+    val songs: List<SearchEntry<Song>> = emptyList(),
+    val albums: List<SearchEntry<Album>> = emptyList(),
+    val artists: List<SearchEntry<Artist>> = emptyList(),
+    val genres: List<SearchEntry<Genre>> = emptyList(),
+)
+
 @OptIn(FlowPreview::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -80,6 +90,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playlists = repository.playlists.playlists
     val artworkOverrides = repository.artwork.overrides
     val playerState = player.state
+    val playbackProgress = player.progress
+    val sleepRemainingMs = player.sleepRemainingMs
 
     val excludedFolders: StateFlow<Set<String>> = repository.preferences.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -194,21 +206,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * library it is a full linear scan per keystroke, and the group-sort flows below use the same
      * `flowOn`. The query is debounced so mid-typing keystrokes don't each trigger a scan.
      */
+    private val searchIndex: StateFlow<SearchIndex> = library.map { lib ->
+        SearchIndex(
+            songs = lib.songs.map { SearchEntry(it, "${it.title}\u0000${it.artist}\u0000${it.album}".lowercase()) },
+            albums = lib.albums.map { SearchEntry(it, "${it.name}\u0000${it.artist}".lowercase()) },
+            artists = lib.artists.map { SearchEntry(it, it.name.lowercase()) },
+            genres = lib.genres.map { SearchEntry(it, it.name.lowercase()) },
+        )
+    }.flowOn(Dispatchers.Default).asState(SearchIndex())
+
     val searchResults: StateFlow<SearchResults> =
-        combine(library, _searchQuery.debounce(SEARCH_DEBOUNCE_MS)) { lib, query ->
+        combine(searchIndex, _searchQuery.debounce(SEARCH_DEBOUNCE_MS)) { index, query ->
             val term = query.trim().lowercase()
             if (term.isBlank()) SearchResults()
             else SearchResults(
-                songs = lib.songs.filter {
-                    it.title.lowercase().contains(term) ||
-                        it.artist.lowercase().contains(term) ||
-                        it.album.lowercase().contains(term)
-                },
-                albums = lib.albums.filter {
-                    it.name.lowercase().contains(term) || it.artist.lowercase().contains(term)
-                },
-                artists = lib.artists.filter { it.name.lowercase().contains(term) },
-                genres = lib.genres.filter { it.name.lowercase().contains(term) },
+                songs = index.songs.filter { term in it.text }.map { it.value },
+                albums = index.albums.filter { term in it.text }.map { it.value },
+                artists = index.artists.filter { term in it.text }.map { it.value },
+                genres = index.genres.filter { term in it.text }.map { it.value },
             )
         }.flowOn(Dispatchers.Default).asState(SearchResults())
 
@@ -219,11 +234,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _metadataSong = MutableStateFlow<Song?>(null)
     val metadataSong: StateFlow<Song?> = _metadataSong.asStateFlow()
 
+    /** Transient user-facing messages, e.g. why an artwork change failed. */
+    private val _messages = MutableStateFlow<String?>(null)
+    val messages: StateFlow<String?> = _messages.asStateFlow()
+
     init {
         player.connect()
         // Mirror playback prefs onto the controller as they change.
         viewModelScope.launch {
             preferences.rewindOnPrevious.collect { player.rewindOnPrevious = it }
+        }
+        viewModelScope.launch {
+            repository.playStats.errors.collect { _messages.value = it }
         }
 
 
@@ -235,23 +257,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var lastId: Long? = null
             var lastPosition = 0L
             var counted = false
-            playerState.collect { state ->
-                val id = state.currentSongId ?: return@collect
-                if (id != lastId || state.positionMs < lastPosition) {
-                    lastId = id
-                    counted = false
-                }
-                lastPosition = state.positionMs
+            combine(playerState, playbackProgress) { state, progress -> state to progress }
+                .collect { (state, progress) ->
+                    val id = state.currentSongId ?: return@collect
+                    if (id != lastId || progress.positionMs < lastPosition) {
+                        lastId = id
+                        counted = false
+                    }
+                    lastPosition = progress.positionMs
 
-                // Short tracks would never reach a fixed threshold, so cap it at half their length.
-                val threshold =
-                    if (state.durationMs > 0) minOf(PLAY_COUNT_AFTER_MS, state.durationMs / 2)
-                    else PLAY_COUNT_AFTER_MS
-                if (!counted && state.positionMs >= threshold) {
-                    counted = true
-                    repository.playStats.recordPlay(id, System.currentTimeMillis())
+                    // Short tracks would never reach a fixed threshold, so cap it at half their length.
+                    val threshold =
+                        if (progress.durationMs > 0) minOf(PLAY_COUNT_AFTER_MS, progress.durationMs / 2)
+                        else PLAY_COUNT_AFTER_MS
+                    if (!counted && progress.positionMs >= threshold) {
+                        counted = true
+                        repository.songById(id)?.let {
+                            repository.playStats.recordPlay(it, System.currentTimeMillis())
+                        }
+                    }
                 }
-            }
         }
 
         // Apply ReplayGain when the track changes. Reading the tag is deferred to here rather than
@@ -283,10 +308,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     a.queueIds == b.queueIds && a.queueIndex == b.queueIndex &&
                         a.shuffle == b.shuffle && a.repeatMode == b.repeatMode
                 }
-                .collect { persistResume(it) }
+                .collect { persistResume(it, playbackProgress.value.positionMs) }
         }
         viewModelScope.launch {
-            playerState.sample(RESUME_POSITION_SAVE_MS).collect { persistResume(it) }
+            playbackProgress.sample(RESUME_POSITION_SAVE_MS).collect {
+                persistResume(playerState.value, it.positionMs)
+            }
         }
     }
 
@@ -305,12 +332,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Writes the resume snapshot, honouring [rememberPlayback] and skipping an empty queue. */
-    private suspend fun persistResume(state: PlayerState) {
+    private suspend fun persistResume(state: PlayerState, positionMs: Long) {
         if (!rememberPlayback.value || state.queueIds.isEmpty()) return
+        val queueKeys = repository.songsByIds(state.queueIds).associateBy { it.id }
         preferences.saveResumeState(
             state.queueIds,
+            state.queueIds.mapNotNull { queueKeys[it]?.stableKey },
             state.queueIndex,
-            state.positionMs,
+            positionMs,
             state.shuffle,
             state.repeatMode,
         )
@@ -323,8 +352,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun restorePlayback() = viewModelScope.launch {
         if (!preferences.rememberPlayback.first()) return@launch
         val saved = preferences.resumeState.first() ?: return@launch
-        val songs = library.first { it.songs.isNotEmpty() }.songs.associateBy { it.id }
-        val queue = saved.queue.mapNotNull { songs[it] }
+        val songs = library.first { it.songs.isNotEmpty() }.songs
+        val byId = songs.associateBy { it.id }
+        val byKey = songs.associateBy { it.stableKey }
+        val queue = if (saved.queueKeys.isNotEmpty()) saved.queueKeys.mapNotNull(byKey::get)
+            else saved.queue.mapNotNull(byId::get)
         if (queue.isEmpty()) return@launch
 
         // Shuffle and repeat come back only when the user asked to keep them; otherwise the
@@ -344,11 +376,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onPermissionGranted() {
         if (_permissionGranted.value) return
         _permissionGranted.value = true
-        viewModelScope.launch { repository.initialise() }
+        viewModelScope.launch {
+            runCatching { repository.initialise() }
+                .onSuccess { failures -> if (failures.isNotEmpty()) _messages.value = failures.joinToString("\n") }
+                .onFailure { reportFailure("Library scan", it) }
+        }
         restorePlayback()
     }
 
-    fun refresh() = viewModelScope.launch { repository.refresh() }
+    fun refresh() = launchAction("Library scan") { repository.refresh() }
 
     // ---- Lookups -----------------------------------------------------------
 
@@ -379,21 +415,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * changes how that album is represented, not what any individual track looks like. A song's
      * thumbnail stays whatever its tags say until those tags change.
      */
-    fun artForSong(song: Song): ArtRequest = ArtRequest(overridePath = null, audioPath = song.path)
+    fun artForSong(song: Song): ArtRequest = ArtRequest(
+        overridePath = null,
+        audioPath = song.path,
+        version = song.dateModifiedSeconds.toString(),
+    )
 
     fun artForAlbum(album: Album): ArtRequest {
         val override = artworkOverrides.value.albumArt[album.id]
-        return ArtRequest(overridePath = override, audioPath = album.songs.firstOrNull()?.path)
+        val song = album.songs.firstOrNull()
+        return ArtRequest(
+            overridePath = override,
+            audioPath = song?.path,
+            version = override ?: song?.dateModifiedSeconds?.toString().orEmpty(),
+        )
     }
 
     fun artForArtist(artist: Artist): ArtRequest {
         val override = artworkOverrides.value.artistArt[artist.id]
-        return ArtRequest(overridePath = override, audioPath = artist.songs.firstOrNull()?.path)
+        val song = artist.songs.firstOrNull()
+        return ArtRequest(
+            overridePath = override,
+            audioPath = song?.path,
+            version = override ?: song?.dateModifiedSeconds?.toString().orEmpty(),
+        )
     }
-
-    /** Transient user-facing messages, e.g. why an artwork change failed. */
-    private val _messages = MutableStateFlow<String?>(null)
-    val messages: StateFlow<String?> = _messages.asStateFlow()
 
     fun clearMessage() { _messages.value = null }
 
@@ -434,6 +480,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun reportMessage(text: String) { _messages.value = text }
 
+    private fun reportFailure(action: String, failure: Throwable) {
+        _messages.value = "$action failed: ${failure.message ?: failure::class.simpleName}"
+    }
+
+    private fun launchAction(action: String, block: suspend () -> Unit) =
+        viewModelScope.launch { runCatching { block() }.onFailure { reportFailure(action, it) } }
+
     // ---- Favourites & playback rate ----------------------------------------
 
     val favourites = preferences.favourites.asState(emptySet())
@@ -458,7 +511,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun isFavourite(song: Song) = song.id in favourites.value
 
     fun toggleFavourite(song: Song) =
-        viewModelScope.launch { preferences.setFavourite(song.id, song.id !in favourites.value) }
+        launchAction("Favourite update") {
+            preferences.setFavourite(song, song.id !in favourites.value)
+        }
 
     fun setSpeed(speed: Float) = player.setSpeed(speed)
 
@@ -489,7 +544,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * to its own tag. Audio files are not modified — see [dev.tune.player.data.GenreStore].
      */
     fun assignGenre(songIds: Collection<Long>, genre: String) =
-        viewModelScope.launch { repository.genres.assign(songIds, genre) }
+        launchAction("Genre update") {
+            repository.genres.assign(repository.songsByIds(songIds.toList()), genre)
+        }
 
     fun assignGenreToSelection(genre: String) {
         val ids = _selection.value
@@ -519,9 +576,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private data class SortInputs(
         val order: GroupSortOrder,
         val stats: Map<Long, PlayStat>,
-        val collator: NameCollator,
+        val ignoreArticles: Boolean,
         val descending: Boolean,
-    )
+    ) {
+        val collator get() = NameCollator(ignoreArticles)
+    }
 
     private val sortInputs =
         combine(
@@ -530,26 +589,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.preferences.autoSortNames,
             repository.preferences.groupSortDescending,
         ) { order, stats, articles, descending ->
-            SortInputs(order, stats, NameCollator(articles), descending)
-        }
+            val usesStats = order == GroupSortOrder.MOST_PLAYED ||
+                order == GroupSortOrder.RECENTLY_PLAYED
+            SortInputs(order, if (usesStats) stats else emptyMap(), articles, descending)
+        }.distinctUntilChanged()
 
     val sortedAlbums: StateFlow<List<Album>> =
-        combine(library, sortInputs) { lib, s ->
+        combine(repository.groupedLibrary, sortInputs) { lib, s ->
             lib.albums.sortedWith(s.order.albumComparator(s.collator, s.stats, s.descending))
         }.flowOn(Dispatchers.Default).asState(emptyList())
 
     val sortedArtists: StateFlow<List<Artist>> =
-        combine(library, sortInputs) { lib, s ->
+        combine(repository.groupedLibrary, sortInputs) { lib, s ->
             lib.artists.sortedWith(s.order.artistComparator(s.collator, s.stats, s.descending))
         }.flowOn(Dispatchers.Default).asState(emptyList())
 
     val sortedGenres: StateFlow<List<Genre>> =
-        combine(library, sortInputs) { lib, s ->
+        combine(repository.groupedLibrary, sortInputs) { lib, s ->
             lib.genres.sortedWith(s.order.genreComparator(s.collator, s.stats, s.descending))
         }.flowOn(Dispatchers.Default).asState(emptyList())
 
     val sortedFolders: StateFlow<List<Folder>> =
-        combine(library, sortInputs) { lib, s ->
+        combine(repository.groupedLibrary, sortInputs) { lib, s ->
             lib.folders.sortedWith(s.order.folderComparator(s.collator, s.descending))
         }.flowOn(Dispatchers.Default).asState(emptyList())
 
@@ -566,26 +627,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Tracks that appear more than once. Reported only — nothing here touches a file. */
     val duplicates: StateFlow<List<DuplicateGroup>> =
-        library.map { findDuplicates(it.songs) }
+        repository.groupedLibrary.map { findDuplicates(it.songs) }
             .flowOn(Dispatchers.Default)
             .asState(emptyList())
 
     // ---- Playlists ---------------------------------------------------------
 
     fun createPlaylist(name: String, songIds: List<Long> = emptyList()) =
-        viewModelScope.launch { repository.playlists.create(name, songIds) }
+        launchAction("Create playlist") {
+            val songs = repository.songsByIds(songIds)
+            repository.playlists.create(name, songs.map { it.id }, songs.map { it.stableKey })
+        }
 
     fun deletePlaylist(id: String) =
-        viewModelScope.launch { repository.playlists.delete(id) }
+        launchAction("Delete playlist") { repository.playlists.delete(id) }
 
     fun renamePlaylist(id: String, name: String) =
-        viewModelScope.launch { repository.playlists.rename(id, name) }
+        launchAction("Rename playlist") { repository.playlists.rename(id, name) }
 
     fun addToPlaylist(playlistId: String, songIds: List<Long>) =
-        viewModelScope.launch { repository.playlists.addSongs(playlistId, songIds) }
+        launchAction("Update playlist") {
+            val songs = repository.songsByIds(songIds)
+            repository.playlists.addSongs(playlistId, songs.map { it.id }, songs.map { it.stableKey })
+        }
 
     fun removeFromPlaylist(playlistId: String, songId: Long) =
-        viewModelScope.launch { repository.playlists.removeSong(playlistId, songId) }
+        launchAction("Update playlist") {
+            repository.playlists.removeSong(
+                playlistId,
+                songId,
+                repository.songById(songId)?.stableKey,
+            )
+        }
+
+    fun setSleepTimer(minutes: Int?) = player.setSleepTimer(minutes?.times(60_000L))
+
+    fun exportBackup(uri: Uri) = launchAction("Backup export") {
+        repository.exportBackup(uri)
+        _messages.value = "Tune backup exported"
+    }
+
+    fun importBackup(uri: Uri) = launchAction("Backup import") {
+        repository.importBackup(uri)
+        _messages.value = "Tune backup imported"
+    }
+
+    fun exportPlaylist(uri: Uri, playlist: Playlist) = launchAction("Playlist export") {
+        repository.exportM3u(uri, playlist)
+        _messages.value = "Playlist exported"
+    }
+
+    fun importPlaylist(uri: Uri) = launchAction("Playlist import") {
+        val playlist = repository.importM3u(uri)
+        _messages.value = "Imported ${playlist.name}"
+    }
 
     // ---- Playback ----------------------------------------------------------
 

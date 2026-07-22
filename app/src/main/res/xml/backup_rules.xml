@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- MediaStore album/artist ids are device-local; never restore these mappings elsewhere. -->
+    <exclude domain="file" path="artwork-overrides.json" />
+    <exclude domain="file" path="artwork/" />
+    <exclude domain="file" path="release-dates.json" />
+</full-backup-content>

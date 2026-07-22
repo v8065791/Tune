@@ -18,10 +18,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
 
 @Serializable
-private data class StatsFile(val plays: Map<String, PlayStat> = emptyMap())
+private data class StatsFile(
+    val plays: Map<String, PlayStat> = emptyMap(),
+    val songKeys: Map<String, PlayStat> = emptyMap(),
+)
 
 @Serializable
 data class PlayStat(val count: Int = 0, val lastPlayedEpochMs: Long = 0L)
@@ -35,10 +37,14 @@ data class PlayStat(val count: Int = 0, val lastPlayedEpochMs: Long = 0L)
 class PlayStatsStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val file: File get() = File(context.filesDir, "play-stats.json")
+    private val file = AtomicTextFile(context.filesDir.resolve("play-stats.json"))
+    private var portable: Map<String, PlayStat> = emptyMap()
 
     private val _stats = MutableStateFlow<Map<Long, PlayStat>>(emptyMap())
     val stats: StateFlow<Map<Long, PlayStat>> = _stats.asStateFlow()
+
+    private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val errors = _errors
 
     /** Serialises the disk write against a concurrent clear. */
     private val mutex = Mutex()
@@ -61,28 +67,29 @@ class PlayStatsStore(private val context: Context) {
         // that window is acceptable; these are non-critical stats, not the resume state.
         scope.launch {
             dirty.collect {
-                persist()
+                runCatching { persist() }.onFailure {
+                    _errors.tryEmit("Play statistics could not be saved: ${it.message ?: it::class.simpleName}")
+                }
                 delay(PERSIST_INTERVAL_MS)
             }
         }
     }
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        _stats.value = runCatching {
-            if (!file.exists()) return@runCatching emptyMap()
-            json.decodeFromString<StatsFile>(file.readText())
-                .plays
-                .mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }
-                .toMap()
-        }.getOrElse { emptyMap() }
+        if (!file.exists) return@withContext
+        val stored = json.decodeFromString<StatsFile>(file.readText())
+        _stats.value = stored.plays.mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }.toMap()
+        portable = stored.songKeys
     }
 
-    /** Records one play of [songId]. Called when a track actually starts, not when queued. */
-    suspend fun recordPlay(songId: Long, atEpochMs: Long) = withContext(Dispatchers.IO) {
+    /** Records one play of [song]. Called when a track actually starts, not when queued. */
+    suspend fun recordPlay(song: Song, atEpochMs: Long) = withContext(Dispatchers.IO) {
         _stats.update { current ->
-            val previous = current[songId] ?: PlayStat()
-            current + (songId to PlayStat(previous.count + 1, atEpochMs))
+            val previous = current[song.id] ?: PlayStat()
+            current + (song.id to PlayStat(previous.count + 1, atEpochMs))
         }
+        val previous = portable[song.stableKey] ?: PlayStat()
+        portable = portable + (song.stableKey to PlayStat(previous.count + 1, atEpochMs))
         dirty.tryEmit(Unit)
         Unit
     }
@@ -90,17 +97,59 @@ class PlayStatsStore(private val context: Context) {
     suspend fun clear() = withContext(Dispatchers.IO) {
         mutex.withLock {
             _stats.value = emptyMap()
-            runCatching { file.delete() }
+            portable = emptyMap()
+            file.delete()
         }
         Unit
     }
 
+    /** Resolves portable keys and upgrades legacy id-only statistics after a MediaStore scan. */
+    suspend fun reconcile(songs: List<Song>) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val byId = songs.associateBy { it.id }
+            val byKey = songs.associateBy { it.stableKey }
+            val resolved = mutableMapOf<Long, PlayStat>()
+            val keys = portable.toMutableMap()
+            for ((key, stat) in portable) byKey[key]?.let { resolved[it.id] = stat }
+            for ((id, stat) in _stats.value) {
+                byId[id]?.let {
+                    val merged = maxStat(resolved[it.id], stat)
+                    resolved[it.id] = merged
+                    keys[it.stableKey] = maxStat(keys[it.stableKey], stat)
+                }
+            }
+            if (resolved != _stats.value || keys != portable) {
+                file.writeText(encode(resolved, keys))
+                _stats.value = resolved
+                portable = keys
+            }
+        }
+    }
+
+    suspend fun replacePortable(values: Map<String, PlayStat>, songs: List<Song>) =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val byKey = songs.associateBy { it.stableKey }
+                val ids = values.mapNotNull { (key, stat) -> byKey[key]?.let { it.id to stat } }.toMap()
+                file.writeText(encode(ids, values))
+                _stats.value = ids
+                portable = values
+            }
+        }
+
     private suspend fun persist() = mutex.withLock {
         val snapshot = _stats.value
-        runCatching {
-            file.writeText(json.encodeToString(StatsFile(snapshot.mapKeys { it.key.toString() })))
-        }
+        file.writeText(encode(snapshot, portable))
         Unit
+    }
+
+    private fun encode(ids: Map<Long, PlayStat>, keys: Map<String, PlayStat>): String =
+        json.encodeToString(StatsFile(ids.mapKeys { it.key.toString() }, keys))
+
+    private fun maxStat(a: PlayStat?, b: PlayStat): PlayStat = when {
+        a == null -> b
+        a.lastPlayedEpochMs >= b.lastPlayedEpochMs -> a
+        else -> b
     }
 
     private companion object {

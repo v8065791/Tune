@@ -84,7 +84,9 @@ object MediaScanner {
 
         // Only present on API 30+; -1 means "column not queried".
         private val albumArtist = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ARTIST)
-        private val genre = cursor.getColumnIndex(MediaStore.Audio.Media.GENRE)
+        private val genre = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            cursor.getColumnIndex(MediaStore.Audio.Media.GENRE)
+        } else -1
         private val disc = cursor.getColumnIndex(MediaStore.Audio.Media.DISC_NUMBER)
 
         fun readSong(): Song? {

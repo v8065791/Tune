@@ -20,7 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,15 +42,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val vm: MainViewModel = viewModel()
-            val themeMode by vm.themeMode.collectAsState()
-            val blackTheme by vm.blackTheme.collectAsState()
-            val dynamicColor by vm.dynamicColor.collectAsState()
+            val themeMode by vm.themeMode.collectAsStateWithLifecycle()
+            val blackTheme by vm.blackTheme.collectAsStateWithLifecycle()
+            val dynamicColor by vm.dynamicColor.collectAsStateWithLifecycle()
 
-            val coverMode by vm.coverMode.collectAsState()
-            val squareCovers by vm.squareCovers.collectAsState()
-            val roundedCorners by vm.roundedCorners.collectAsState()
+            val coverMode by vm.coverMode.collectAsStateWithLifecycle()
+            val squareCovers by vm.squareCovers.collectAsStateWithLifecycle()
+            val roundedCorners by vm.roundedCorners.collectAsStateWithLifecycle()
 
-            val accent by vm.accent.collectAsState()
+            val accent by vm.accent.collectAsStateWithLifecycle()
 
             TuneTheme(
                 themeMode = themeMode,
@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun PermissionGate(vm: MainViewModel, content: @Composable () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val granted by vm.permissionGranted.collectAsState()
+    val granted by vm.permissionGranted.collectAsStateWithLifecycle()
 
     val permissions = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

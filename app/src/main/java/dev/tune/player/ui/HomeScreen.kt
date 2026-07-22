@@ -28,7 +28,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,21 +88,21 @@ fun HomeScreen(
     onSelectionToPlaylist: () -> Unit,
     onSelectionSetGenre: () -> Unit,
 ) {
-    val library by vm.library.collectAsState()
+    val library by vm.library.collectAsStateWithLifecycle()
     // Group tabs read pre-sorted flows so the chosen order applies without sorting during layout.
-    val albums by vm.sortedAlbums.collectAsState()
-    val artists by vm.sortedArtists.collectAsState()
-    val genres by vm.sortedGenres.collectAsState()
-    val folders by vm.sortedFolders.collectAsState()
-    val playlists by vm.sortedPlaylists.collectAsState()
-    val playerState by vm.playerState.collectAsState()
-    val isScanning by vm.isScanning.collectAsState()
-    val sort by vm.songSort.collectAsState()
-    val groupSort by vm.groupSort.collectAsState()
-    val sortDescending by vm.sortDescending.collectAsState()
-    val groupSortDescending by vm.groupSortDescending.collectAsState()
-    val tabs by vm.homeTabs.collectAsState()
-    val grid by vm.gridView.collectAsState()
+    val albums by vm.sortedAlbums.collectAsStateWithLifecycle()
+    val artists by vm.sortedArtists.collectAsStateWithLifecycle()
+    val genres by vm.sortedGenres.collectAsStateWithLifecycle()
+    val folders by vm.sortedFolders.collectAsStateWithLifecycle()
+    val playlists by vm.sortedPlaylists.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
+    val isScanning by vm.isScanning.collectAsStateWithLifecycle()
+    val sort by vm.songSort.collectAsStateWithLifecycle()
+    val groupSort by vm.groupSort.collectAsStateWithLifecycle()
+    val sortDescending by vm.sortDescending.collectAsStateWithLifecycle()
+    val groupSortDescending by vm.groupSortDescending.collectAsStateWithLifecycle()
+    val tabs by vm.homeTabs.collectAsStateWithLifecycle()
+    val grid by vm.gridView.collectAsStateWithLifecycle()
 
     // pageCount is read lazily, so removing a tab in settings updates the pager in place.
     val pagerState = rememberPagerState { tabs.size }
@@ -114,10 +114,10 @@ fun HomeScreen(
     }
     val currentTab = tabs.getOrNull(pagerState.currentPage)
 
-    val selection by vm.selection.collectAsState()
+    val selection by vm.selection.collectAsStateWithLifecycle()
 
-    val favourites by vm.favouriteSongs.collectAsState()
-    val mostPlayed by vm.mostPlayed.collectAsState()
+    val favourites by vm.favouriteSongs.collectAsStateWithLifecycle()
+    val mostPlayed by vm.mostPlayed.collectAsStateWithLifecycle()
 
     // Which song list the current tab is showing — what the selection toolbar acts on.
     val visibleSongs = when (currentTab) {

@@ -4,9 +4,14 @@ import android.content.Context
 import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
+import android.net.Uri
 import android.provider.MediaStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
@@ -17,7 +22,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -26,7 +35,7 @@ import kotlinx.coroutines.withContext
  * Raw scan results are held separately from the filtered [library] so that toggling a folder
  * re-groups in memory instead of re-reading MediaStore.
  */
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class MusicRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -39,6 +48,10 @@ class MusicRepository(private val context: Context) {
     private val releaseDates = ReleaseDateStore(context)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
+    @Volatile private var songIndex: Map<Long, Song> = emptyMap()
+    private val structure = MutableStateFlow(Library())
+    val groupedLibrary: StateFlow<Library> = structure.asStateFlow()
+    private val refreshMutex = Mutex()
 
     private val _library = MutableStateFlow(Library())
     val library: StateFlow<Library> = _library.asStateFlow()
@@ -54,43 +67,53 @@ class MusicRepository(private val context: Context) {
     private data class LibraryOptions(
         val folders: Set<String>,
         val folderMode: FolderMode,
-        val sort: SortOrder,
-        val sortDescending: Boolean,
         val separators: String,
         val autoSortNames: Boolean,
         val hideCollaborators: Boolean,
-        val stats: Map<Long, PlayStat> = emptyMap(),
     )
 
     init {
         val folderOptions =
             combine(preferences.excludedFolders, preferences.folderMode, ::Pair)
 
-        // Order and direction travel together, keeping combine within its five-flow arity.
-        val sortOptions = combine(preferences.songSort, preferences.sortDescending, ::Pair)
-
         val options =
             combine(
                 folderOptions,
-                sortOptions,
                 preferences.separators,
                 preferences.autoSortNames,
                 preferences.hideCollaborators,
-            ) { (folders, mode), (sort, descending), separators, autoSort, hideCollabs ->
-                LibraryOptions(
-                    folders, mode, sort, descending, separators, autoSort, hideCollabs,
-                )
+            ) { (folders, mode), separators, autoSort, hideCollabs ->
+                LibraryOptions(folders, mode, separators, autoSort, hideCollabs)
             }
 
         scope.launch {
-            // Play counts feed the "most played" orders, so the library re-sorts as they change.
             combine(
                 allSongs,
                 options,
-                playStats.stats,
                 genres.overrides,
-            ) { songs, opts, stats, genreOverrides ->
-                buildLibrary(songs, opts.copy(stats = stats), genreOverrides)
+            ) { songs, opts, genreOverrides -> buildLibrary(songs, opts, genreOverrides) }
+                .collect { structure.value = it }
+        }
+
+        // Play-count changes only need to reorder the flat song list. Grouping the whole library
+        // again for every recorded play caused avoidable CPU and allocation spikes.
+        scope.launch {
+            val sortOptions = combine(
+                preferences.songSort,
+                preferences.sortDescending,
+                preferences.autoSortNames,
+            ) { sort, descending, autoSort -> Triple(sort, descending, autoSort) }
+            sortOptions.flatMapLatest { sorting ->
+                val (sort, descending, autoSort) = sorting
+                val usesStats = sort == SortOrder.MOST_PLAYED || sort == SortOrder.RECENTLY_PLAYED
+                val stats = if (usesStats) playStats.stats else flowOf(emptyMap())
+                combine(structure, stats) { library, playStats ->
+                    library.copy(
+                        songs = library.songs.sortedWith(
+                            sort.comparator(NameCollator(autoSort), playStats, descending)
+                        )
+                    )
+                }
             }.collect { _library.value = it }
         }
 
@@ -127,21 +150,33 @@ class MusicRepository(private val context: Context) {
         }
     }
 
-    suspend fun initialise() {
-        artwork.load()
-        playlists.load()
-        playStats.load()
-        genres.load()
-        releaseDates.load()
+    suspend fun initialise(): List<String> {
+        val failures = coroutineScope {
+            listOf(
+                async { "artwork" to runCatching { artwork.load() } },
+                async { "playlists" to runCatching { playlists.load() } },
+                async { "play statistics" to runCatching { playStats.load() } },
+                async { "genre overrides" to runCatching { genres.load() } },
+                async { "release-date cache" to runCatching { releaseDates.load() } },
+            ).awaitAll()
+        }.mapNotNull { (name, result) ->
+            result.exceptionOrNull()?.let { "$name could not be loaded: ${it.message ?: it::class.simpleName}" }
+        }
         refresh()
+        return failures
     }
 
     /** Re-reads MediaStore. Safe to call repeatedly; the UI shows [isScanning] while it runs. */
-    suspend fun refresh() {
+    suspend fun refresh() = refreshMutex.withLock {
         _isScanning.value = true
         try {
             // MediaStore only reports a year, so full dates are read from the tags and cached.
             val songs = releaseDates.enrich(MediaScanner.scan(context))
+            playlists.reconcile(songs)
+            playStats.reconcile(songs)
+            genres.reconcile(songs)
+            preferences.reconcileSongReferences(songs)
+            songIndex = songs.associateBy { it.id }
             allSongs.value = songs
             _allFolders.value = songs.groupingBy { it.folderPath }
                 .eachCount()
@@ -152,12 +187,55 @@ class MusicRepository(private val context: Context) {
         }
     }
 
-    fun songById(id: Long): Song? = _library.value.songs.firstOrNull { it.id == id }
+    fun songById(id: Long): Song? = songIndex[id]
 
     fun songsByIds(ids: List<Long>): List<Song> {
-        val byId = _library.value.songs.associateBy { it.id }
         // Preserve the caller's ordering — playlists are order-sensitive.
-        return ids.mapNotNull { byId[it] }
+        return ids.mapNotNull(songIndex::get)
+    }
+
+    suspend fun exportBackup(destination: Uri) = withContext(Dispatchers.IO) {
+        val songs = allSongs.value
+        val byId = songs.associateBy { it.id }
+        val favouriteIds = preferences.favourites.first()
+        val backup = TuneBackup(
+            playlists = playlists.playlists.value.map { playlist ->
+                val keys = playlist.songKeys.ifEmpty {
+                    playlist.songIds.mapNotNull { byId[it]?.stableKey }
+                }
+                playlist.copy(songIds = emptyList(), songKeys = keys)
+            },
+            favouriteSongKeys = favouriteIds.mapNotNullTo(mutableSetOf()) { byId[it]?.stableKey },
+            genresBySongKey = genres.overrides.value.mapNotNull { (id, genre) ->
+                byId[id]?.stableKey?.let { it to genre }
+            }.toMap(),
+            playStatsBySongKey = playStats.stats.value.mapNotNull { (id, stat) ->
+                byId[id]?.stableKey?.let { it to stat }
+            }.toMap(),
+        )
+        LibraryTransfer.writeBackup(context, destination, backup)
+    }
+
+    suspend fun importBackup(source: Uri) = withContext(Dispatchers.IO) {
+        val backup = LibraryTransfer.readBackup(context, source)
+        val songs = allSongs.value
+        val byKey = songs.associateBy { it.stableKey }
+        val importedPlaylists = backup.playlists.map { playlist ->
+            playlist.copy(songIds = playlist.songKeys.mapNotNull { byKey[it]?.id })
+        }
+        playlists.replaceAll(importedPlaylists)
+        preferences.replaceFavourites(backup.favouriteSongKeys, songs)
+        genres.replacePortable(backup.genresBySongKey, songs)
+        playStats.replacePortable(backup.playStatsBySongKey, songs)
+    }
+
+    suspend fun exportM3u(destination: Uri, playlist: Playlist) = withContext(Dispatchers.IO) {
+        LibraryTransfer.writeM3u(context, destination, songsByIds(playlist.songIds))
+    }
+
+    suspend fun importM3u(source: Uri): Playlist = withContext(Dispatchers.IO) {
+        val (name, songs) = LibraryTransfer.readM3u(context, source, allSongs.value)
+        playlists.create(name, songs.map { it.id }, songs.map { it.stableKey })
     }
 
     fun albumById(id: Long): Album? = _library.value.albums.firstOrNull { it.id == id }
@@ -189,7 +267,6 @@ class MusicRepository(private val context: Context) {
         val songs =
             if (genreOverrides.isEmpty()) scanned
             else scanned.map { song -> genreOverrides[song.id]?.let { song.copy(genre = it) } ?: song }
-        val sort = options.sort
         val collator = NameCollator(options.autoSortNames)
         // Selecting a directory always covers its subfolders, so picking one top-level folder
         // is enough — matching how a directory picker is normally understood.
@@ -218,6 +295,7 @@ class MusicRepository(private val context: Context) {
             .sortedWith(collator.comparingBy { it.name })
 
         val albumsByArtist = albums.groupBy { it.artistId }
+        val albumsById = albums.associateBy { it.id }
 
         // Group by album artist, not track artist: otherwise a compilation credited to forty
         // featured performers becomes forty separate artists. Songs missing an ALBUM_ARTIST tag
@@ -238,7 +316,7 @@ class MusicRepository(private val context: Context) {
                 val appearsOn =
                     if (!options.hideCollaborators) emptyList()
                     else artistSongs.map { it.albumId }.distinct()
-                        .mapNotNull { id -> albums.firstOrNull { it.id == id } }
+                        .mapNotNull(albumsById::get)
                         .filterNot { it.artistId == artistId }
 
                 Artist(
@@ -269,9 +347,7 @@ class MusicRepository(private val context: Context) {
             .sortedBy { it.path }
 
         Library(
-            songs = visible.sortedWith(
-                sort.comparator(collator, options.stats, options.sortDescending)
-            ),
+            songs = visible,
             albums = albums,
             artists = artists,
             genres = genres,

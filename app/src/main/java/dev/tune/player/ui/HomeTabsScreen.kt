@@ -19,7 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,7 +35,7 @@ import dev.tune.player.data.HomeTab
  */
 @Composable
 fun HomeTabsScreen(vm: MainViewModel, onBack: () -> Unit) {
-    val tabs by vm.homeTabs.collectAsState()
+    val tabs by vm.homeTabs.collectAsStateWithLifecycle()
     val disabled = HomeTab.entries.filterNot { it in tabs }
     val rows = tabs + disabled
 

@@ -1,6 +1,7 @@
 package dev.tune.player.data
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +36,7 @@ data class ArtworkOverrides(
 class ArtworkStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val indexFile: File get() = File(context.filesDir, "artwork-overrides.json")
+    private val indexFile = AtomicTextFile(context.filesDir.resolve("artwork-overrides.json"))
     private val artDir: File get() = File(context.filesDir, "artwork").apply { mkdirs() }
 
     private val _overrides = MutableStateFlow(ArtworkOverrides())
@@ -45,39 +46,46 @@ class ArtworkStore(private val context: Context) {
     private val mutex = Mutex()
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        val parsed = runCatching {
-            if (!indexFile.exists()) return@runCatching OverridesFile()
+        val parsed = if (indexFile.exists) {
             json.decodeFromString<OverridesFile>(indexFile.readText())
-        }.getOrElse { OverridesFile() }
+        } else OverridesFile()
 
         _overrides.value = ArtworkOverrides(
             albumArt = parsed.albumArt.mapNotNullKeysToLong(),
             artistArt = parsed.artistArt.mapNotNullKeysToLong(),
         )
+        val referenced = (_overrides.value.albumArt.values + _overrides.value.artistArt.values).toSet()
+        artDir.listFiles()?.filterNot { it.absolutePath in referenced }?.forEach(File::delete)
     }
 
     /** @return null on success, or a human-readable reason the image could not be saved. */
     suspend fun setAlbumArt(albumId: Long, source: Uri): String? = withContext(Dispatchers.IO) {
         val stored = copyIn(source, "album-$albumId").getOrElse { return@withContext it.describe() }
-        update { it.copy(albumArt = it.albumArt + (albumId to stored)) }
+        replace(stored, _overrides.value.albumArt[albumId]) {
+            it.copy(albumArt = it.albumArt + (albumId to stored))
+        }
     }
 
     /** @return null on success, or a human-readable reason the image could not be saved. */
     suspend fun setArtistArt(artistId: Long, source: Uri): String? = withContext(Dispatchers.IO) {
         val stored = copyIn(source, "artist-$artistId").getOrElse { return@withContext it.describe() }
-        update { it.copy(artistArt = it.artistArt + (artistId to stored)) }
+        replace(stored, _overrides.value.artistArt[artistId]) {
+            it.copy(artistArt = it.artistArt + (artistId to stored))
+        }
     }
 
     private fun Throwable.describe() = this::class.simpleName + ": " + (message ?: "unknown error")
 
     suspend fun clearAlbumArt(albumId: Long) = withContext(Dispatchers.IO) {
-        _overrides.value.albumArt[albumId]?.let { File(it).delete() }
-        update { it.copy(albumArt = it.albumArt - albumId) }
+        val old = _overrides.value.albumArt[albumId]
+        update { it.copy(albumArt = it.albumArt - albumId) }?.let { error(it) }
+        old?.let { File(it).delete() }
     }
 
     suspend fun clearArtistArt(artistId: Long) = withContext(Dispatchers.IO) {
-        _overrides.value.artistArt[artistId]?.let { File(it).delete() }
-        update { it.copy(artistArt = it.artistArt - artistId) }
+        val old = _overrides.value.artistArt[artistId]
+        update { it.copy(artistArt = it.artistArt - artistId) }?.let { error(it) }
+        old?.let { File(it).delete() }
     }
 
     /**
@@ -90,22 +98,39 @@ class ArtworkStore(private val context: Context) {
     private fun copyIn(source: Uri, baseName: String): Result<String> = runCatching {
         val dir = artDir
         check(dir.isDirectory) { "Could not create ${dir.absolutePath}" }
-        dir.listFiles { f -> f.name.startsWith("$baseName-") }?.forEach { it.delete() }
 
         val target = File(dir, "$baseName-${System.currentTimeMillis()}.img")
-        val stream = context.contentResolver.openInputStream(source)
-            ?: error("Could not read the selected image")
-        stream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
-
-        check(target.length() > 0) { "The selected image was empty" }
-        target.absolutePath
+        try {
+            val stream = context.contentResolver.openInputStream(source)
+                ?: error("Could not read the selected image")
+            stream.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        check(total <= MAX_CUSTOM_ART_BYTES) { "The selected image is larger than 32 MiB" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            check(target.length() > 0) { "The selected image was empty" }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(target.absolutePath, bounds)
+            check(bounds.outWidth > 0 && bounds.outHeight > 0) { "The selected file is not an image" }
+            target.absolutePath
+        } catch (failure: Throwable) {
+            target.delete()
+            throw failure
+        }
     }
 
     /** @return null on success, or the reason the index could not be written. */
     private suspend fun update(transform: (ArtworkOverrides) -> ArtworkOverrides): String? =
         mutex.withLock {
             val next = transform(_overrides.value)
-            _overrides.value = next
             runCatching {
                 indexFile.writeText(
                     json.encodeToString(
@@ -115,12 +140,27 @@ class ArtworkStore(private val context: Context) {
                         )
                     )
                 )
-            }.exceptionOrNull()?.describe()
+            }.onSuccess { _overrides.value = next }.exceptionOrNull()?.describe()
         }
+
+    private suspend fun replace(
+        newPath: String,
+        oldPath: String?,
+        transform: (ArtworkOverrides) -> ArtworkOverrides,
+    ): String? {
+        val failure = update(transform)
+        if (failure == null) oldPath?.takeIf { it != newPath }?.let { File(it).delete() }
+        else File(newPath).delete()
+        return failure
+    }
 
     private fun Map<String, String>.mapNotNullKeysToLong(): Map<Long, String> =
         mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }
             // Drop entries whose backing file was cleared by the OS or an app-data wipe.
             .filter { File(it.second).exists() }
             .toMap()
+
+    private companion object {
+        const val MAX_CUSTOM_ART_BYTES = 32L * 1024 * 1024
+    }
 }

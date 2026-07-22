@@ -16,12 +16,14 @@ device, plays it, and stays out of the way.
   year, track, disc, duration, format, size, dates, path)
 - **Artwork** — embedded cover art everywhere, with custom images assignable per album and artist
 - **Custom genres** — assign to one song or a whole selection
-- **ReplayGain** — MP3, FLAC, Ogg Vorbis and Opus
+- **ReplayGain** — MP3, FLAC, Ogg Vorbis, Opus, M4A and ALAC
 - **Duplicate detection**
 - **Playback** — background service with notification, lockscreen and Bluetooth controls; shuffle,
   repeat, queue reordering, seek, speed control, resume across restarts (queue, position, shuffle
   and repeat), pause on headphone disconnect, system equalizer handoff
 - **Playlists** — create, rename, delete, add and remove songs
+- **Portable library data** — JSON backup/restore and M3U8 playlist import/export
+- **Sleep timer** — pause automatically after a chosen interval
 - **Appearance** — Material You, eight accent colours, AMOLED black, square or original-ratio
   covers
 
@@ -161,7 +163,8 @@ Worth reading before changing anything:
 ./gradlew :app:testReleaseUnitTest
 ```
 
-Covers the ReplayGain tag parser, duplicate detection, and every sort comparator.
+Covers ReplayGain and release-date parsing (including M4A atoms), stable song identities,
+duplicate detection, and every sort comparator.
 
 The fixtures in `app/src/test/resources/gain` are **real files generated with ffmpeg**, not
 hand-assembled byte arrays — the failure mode being guarded against is a byte offset that is wrong
@@ -178,9 +181,8 @@ minute of actually using the app.
 
 ## Known limitations
 
-- **No M4A/ALAC tag reading** — iTunes `----` atoms aren't parsed, so those files get no ReplayGain
-  and no full release date (they fall back to MediaStore's year) rather than a wrong one.
 - **No ID3v2.2** — three-character frame ids, effectively extinct.
+- **No APEv2 tag reading** — files using only APEv2 metadata get no ReplayGain or full date.
 - **ReplayGain only attenuates** unless a peak tag is present, since boosting past `1/peak` would
   clip and there is no limiter in the chain.
 - **Skip-silence is not implemented.** ExoPlayer handles true gapless natively, but

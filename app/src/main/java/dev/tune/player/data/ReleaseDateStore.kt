@@ -11,11 +11,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
 import java.util.Locale
 
 @Serializable
-private data class DateFile(val dates: Map<String, DateEntry> = emptyMap())
+private data class DateFile(
+    val dates: Map<String, DateEntry> = emptyMap(),
+    val songKeys: Map<String, DateEntry> = emptyMap(),
+)
 
 /** [modified] is the file's mtime when [date] was read — how a re-tagged file invalidates itself. */
 @Serializable
@@ -33,19 +35,17 @@ private data class DateEntry(val date: Int, val modified: Long)
 class ReleaseDateStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val file: File get() = File(context.filesDir, "release-dates.json")
+    private val file = AtomicTextFile(context.filesDir.resolve("release-dates.json"))
 
-    private var cache: MutableMap<Long, DateEntry> = mutableMapOf()
+    private var cache: MutableMap<String, DateEntry> = mutableMapOf()
+    private var legacy: MutableMap<Long, DateEntry> = mutableMapOf()
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        cache = runCatching {
-            if (!file.exists()) return@runCatching mutableMapOf()
-            json.decodeFromString<DateFile>(file.readText())
-                .dates
-                .mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }
-                .toMap()
-                .toMutableMap()
-        }.getOrElse { mutableMapOf() }
+        if (!file.exists) return@withContext
+        val stored = json.decodeFromString<DateFile>(file.readText())
+        cache = stored.songKeys.toMutableMap()
+        legacy = stored.dates.mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }
+            .toMap().toMutableMap()
         Unit
     }
 
@@ -57,7 +57,8 @@ class ReleaseDateStore(private val context: Context) {
      */
     suspend fun enrich(songs: List<Song>): List<Song> {
         val stale = songs.filter { song ->
-            song.hasReadableDate && cache[song.id]?.modified != song.dateModifiedSeconds
+            song.hasReadableDate &&
+                (cache[song.stableKey] ?: legacy[song.id])?.modified != song.dateModifiedSeconds
         }
 
         if (stale.isNotEmpty()) {
@@ -67,7 +68,7 @@ class ReleaseDateStore(private val context: Context) {
                     stale.map { song ->
                         async {
                             gate.withPermit {
-                                song.id to DateEntry(
+                                song.stableKey to DateEntry(
                                     date = ReleaseDateReader.read(song.path),
                                     modified = song.dateModifiedSeconds,
                                 )
@@ -79,25 +80,32 @@ class ReleaseDateStore(private val context: Context) {
             // Entries are kept even when the read found nothing, so a dateless file is opened
             // once rather than on every scan.
             cache.putAll(fresh)
-            persist()
+            runCatching { persist() }
+        }
+
+        // Promote legacy id entries only after the current MediaStore rows are known.
+        var migrated = false
+        for (song in songs) {
+            val old = legacy.remove(song.id) ?: continue
+            cache.putIfAbsent(song.stableKey, old)
+            migrated = true
         }
 
         // Songs that have gone away shouldn't keep growing the file.
-        val live = songs.mapTo(HashSet()) { it.id }
-        if (cache.keys.retainAll(live)) persist()
+        val live = songs.mapTo(HashSet()) { it.stableKey }
+        if (cache.keys.retainAll(live) || migrated || legacy.isNotEmpty()) {
+            legacy.clear()
+            runCatching { persist() }
+        }
 
         return songs.map { song ->
-            val date = cache[song.id]?.date ?: ReleaseDateReader.NONE
+            val date = cache[song.stableKey]?.date ?: ReleaseDateReader.NONE
             if (date > 0) song.copy(releaseDate = date) else song
         }
     }
 
     private suspend fun persist() = withContext(Dispatchers.IO) {
-        runCatching {
-            file.writeText(
-                json.encodeToString(DateFile(cache.mapKeys { it.key.toString() }))
-            )
-        }
+        file.writeText(json.encodeToString(DateFile(songKeys = cache)))
         Unit
     }
 
@@ -119,4 +127,6 @@ class ReleaseDateStore(private val context: Context) {
 private val Song.hasReadableDate: Boolean
     get() = path.substringAfterLast('.', "").lowercase(Locale.ROOT) in DATE_BEARING_EXTENSIONS
 
-private val DATE_BEARING_EXTENSIONS = setOf("opus", "ogg", "oga", "flac", "mp3")
+private val DATE_BEARING_EXTENSIONS = setOf(
+    "opus", "ogg", "oga", "flac", "mp3", "m4a", "mp4", "alac", "aac",
+)

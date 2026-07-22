@@ -20,7 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -118,7 +118,7 @@ fun SongsTab(
         EmptyState(emptyMessage, modifier)
         return
     }
-    val selection by vm.selection.collectAsState()
+    val selection by vm.selection.collectAsStateWithLifecycle()
     val selecting = selection.isNotEmpty()
 
     // A tap plays, unless a bulk selection is in progress — then it toggles instead.
@@ -174,7 +174,7 @@ fun AlbumsTab(
 ) {
     // Subscribing to the overrides here is what makes the tab refresh after a custom image is set
     // or cleared — artForAlbum reads the store directly and can't trigger recomposition.
-    val overrides by vm.artworkOverrides.collectAsState()
+    val overrides by vm.artworkOverrides.collectAsStateWithLifecycle()
 
     GroupTab(
         items = albums,
@@ -198,7 +198,7 @@ fun ArtistsTab(
     grid: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val overrides by vm.artworkOverrides.collectAsState()
+    val overrides by vm.artworkOverrides.collectAsStateWithLifecycle()
 
     GroupTab(
         items = artists,

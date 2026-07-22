@@ -33,6 +33,7 @@ enum class HomeTab(val label: String) {
  */
 data class ResumeState(
     val queue: List<Long>,
+    val queueKeys: List<String> = emptyList(),
     val index: Int,
     val positionMs: Long,
     val shuffle: Boolean = false,
@@ -130,7 +131,9 @@ class UserPreferences(private val context: Context) {
 
         // Favourites and resume state
         val favourites = stringSetPreferencesKey("favourite_songs")
+        val favouriteKeys = stringSetPreferencesKey("favourite_song_keys")
         val resumeQueue = stringPreferencesKey("resume_queue")
+        val resumeQueueKeys = stringPreferencesKey("resume_queue_keys")
         val resumeIndex = stringPreferencesKey("resume_index")
         val resumePosition = stringPreferencesKey("resume_position")
         val resumeShuffle = booleanPreferencesKey("resume_shuffle")
@@ -143,11 +146,14 @@ class UserPreferences(private val context: Context) {
         prefs[Keys.favourites].orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
     }
 
-    suspend fun setFavourite(songId: Long, favourite: Boolean) {
+    suspend fun setFavourite(song: Song, favourite: Boolean) {
         context.dataStore.edit { prefs ->
             val current = prefs[Keys.favourites].orEmpty()
-            val id = songId.toString()
+            val keys = prefs[Keys.favouriteKeys].orEmpty()
+            val id = song.id.toString()
             prefs[Keys.favourites] = if (favourite) current + id else current - id
+            prefs[Keys.favouriteKeys] =
+                if (favourite) keys + song.stableKey else keys - song.stableKey
         }
     }
 
@@ -162,6 +168,8 @@ class UserPreferences(private val context: Context) {
             ?: return@flow null
         ResumeState(
             queue = ids,
+            queueKeys = prefs[Keys.resumeQueueKeys]
+                ?.split(',')?.filter { it.isNotBlank() }.orEmpty(),
             index = prefs[Keys.resumeIndex]?.toIntOrNull() ?: 0,
             positionMs = prefs[Keys.resumePosition]?.toLongOrNull() ?: 0L,
             shuffle = prefs[Keys.resumeShuffle] ?: false,
@@ -171,16 +179,55 @@ class UserPreferences(private val context: Context) {
 
     suspend fun saveResumeState(
         queue: List<Long>,
+        queueKeys: List<String>,
         index: Int,
         positionMs: Long,
         shuffle: Boolean,
         repeatMode: Int,
     ) = edit {
         it[Keys.resumeQueue] = queue.joinToString(",")
+        it[Keys.resumeQueueKeys] = queueKeys.joinToString(",")
         it[Keys.resumeIndex] = index.toString()
         it[Keys.resumePosition] = positionMs.toString()
         it[Keys.resumeShuffle] = shuffle
         it[Keys.resumeRepeat] = repeatMode
+    }
+
+    /** Upgrades MediaStore-id state and resolves portable keys after every completed scan. */
+    suspend fun reconcileSongReferences(songs: List<Song>) {
+        val byId = songs.associateBy { it.id }
+        val byKey = songs.associateBy { it.stableKey }
+        context.dataStore.edit { prefs ->
+            val storedKeys = prefs[Keys.favouriteKeys].orEmpty()
+            val favourites = if (storedKeys.isNotEmpty()) {
+                storedKeys.mapNotNull(byKey::get)
+            } else {
+                prefs[Keys.favourites].orEmpty()
+                    .mapNotNull { it.toLongOrNull()?.let(byId::get) }
+            }
+            prefs[Keys.favourites] = favourites.mapTo(mutableSetOf()) { it.id.toString() }
+            prefs[Keys.favouriteKeys] = favourites.mapTo(mutableSetOf()) { it.stableKey }
+
+            val storedQueueKeys = prefs[Keys.resumeQueueKeys]
+                ?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+            val queue = if (storedQueueKeys.isNotEmpty()) {
+                storedQueueKeys.mapNotNull(byKey::get)
+            } else {
+                prefs[Keys.resumeQueue]?.split(',')
+                    ?.mapNotNull { it.toLongOrNull()?.let(byId::get) }.orEmpty()
+            }
+            prefs[Keys.resumeQueue] = queue.joinToString(",") { it.id.toString() }
+            prefs[Keys.resumeQueueKeys] = queue.joinToString(",") { it.stableKey }
+        }
+    }
+
+    suspend fun replaceFavourites(keys: Set<String>, songs: List<Song>) {
+        val byKey = songs.associateBy { it.stableKey }
+        val resolved = keys.mapNotNull(byKey::get)
+        context.dataStore.edit { prefs ->
+            prefs[Keys.favourites] = resolved.mapTo(mutableSetOf()) { it.id.toString() }
+            prefs[Keys.favouriteKeys] = keys
+        }
     }
 
     // ---- Folders & sorting -------------------------------------------------

@@ -16,7 +16,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -34,8 +34,8 @@ import dev.tune.player.ui.components.formatDuration
  */
 @Composable
 fun DuplicatesScreen(vm: MainViewModel, onBack: () -> Unit, onSongMenu: (Song) -> Unit) {
-    val groups by vm.duplicates.collectAsState()
-    val playerState by vm.playerState.collectAsState()
+    val groups by vm.duplicates.collectAsStateWithLifecycle()
+    val playerState by vm.playerState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {

@@ -13,9 +13,10 @@ import java.io.RandomAccessFile
  *  - **MP3** — ID3v2.3 and v2.4, `TXXX` frames only
  *  - **FLAC** — native Vorbis comments
  *  - **Ogg Vorbis, Opus and Ogg FLAC** — Vorbis comments inside Ogg pages
+ *  - **M4A/MP4/ALAC** — release dates and iTunes freeform ReplayGain atoms
  *
- * Not handled: ID3v2.2 (three-character frame ids, effectively extinct), MP4/M4A `----` atoms,
- * and APEv2 trailers. Those yield no tags rather than wrong ones.
+ * Not handled: ID3v2.2 (three-character frame ids, effectively extinct) and APEv2 trailers.
+ * Those yield no tags rather than wrong ones.
  *
  * This object only parses. What the tags *mean* belongs to its callers — see [ReplayGainReader]
  * and [ReleaseDateReader]. Keeping one walker matters: a second copy of the Ogg page logic would
@@ -47,7 +48,13 @@ internal object TagReader {
                     magic.matches("ID3", length = 3) -> { readId3(raf, sink); 0f }
                     magic.matches("fLaC") -> { readFlac(raf, sink); 0f }
                     magic.matches("OggS") -> readOgg(raf, sink)
-                    else -> 0f
+                    else -> {
+                        raf.seek(4)
+                        val boxType = ByteArray(4)
+                        raf.readFully(boxType)
+                        if (boxType.matches("ftyp")) readMp4(raf, sink)
+                        0f
+                    }
                 }
             }
         } catch (_: Exception) {
@@ -161,6 +168,106 @@ internal object TagReader {
             if (isLast) return
             raf.seek(raf.filePointer + length)
         }
+    }
+
+    // ---- MP4 / M4A / ALAC ---------------------------------------------------
+
+    /** Walks `moov/udta/meta/ilst`, including iTunes freeform ReplayGain atoms. */
+    private fun readMp4(raf: RandomAccessFile, sink: Sink) {
+        scanMp4Atoms(raf, 0L, raf.length(), 0, sink)
+    }
+
+    private fun scanMp4Atoms(
+        raf: RandomAccessFile,
+        start: Long,
+        end: Long,
+        depth: Int,
+        sink: Sink,
+    ) {
+        if (depth > MAX_MP4_DEPTH) return
+        var position = start
+        var count = 0
+        while (position + MP4_ATOM_HEADER_BYTES <= end && count++ < MAX_MP4_ATOMS) {
+            val atom = readMp4Atom(raf, position, end) ?: return
+            when (atom.type) {
+                "ilst" -> readMp4Items(raf, atom.payload, atom.end, sink)
+                "moov", "udta" -> scanMp4Atoms(raf, atom.payload, atom.end, depth + 1, sink)
+                "meta" -> scanMp4Atoms(raf, atom.payload + 4, atom.end, depth + 1, sink)
+            }
+            position = atom.end
+        }
+    }
+
+    private fun readMp4Items(raf: RandomAccessFile, start: Long, end: Long, sink: Sink) {
+        var position = start
+        while (position + MP4_ATOM_HEADER_BYTES <= end) {
+            val item = readMp4Atom(raf, position, end) ?: return
+            when (item.type) {
+                "©day" -> readMp4Data(raf, item.payload, item.end)?.let { sink.accept("DATE", it) }
+                "----" -> readMp4Freeform(raf, item.payload, item.end, sink)
+            }
+            position = item.end
+        }
+    }
+
+    private fun readMp4Freeform(raf: RandomAccessFile, start: Long, end: Long, sink: Sink) {
+        var position = start
+        var meaning: String? = null
+        var name: String? = null
+        var value: String? = null
+        while (position + MP4_ATOM_HEADER_BYTES <= end) {
+            val child = readMp4Atom(raf, position, end) ?: return
+            when (child.type) {
+                "mean" -> meaning = readMp4String(raf, child.payload + 4, child.end)
+                "name" -> name = readMp4String(raf, child.payload + 4, child.end)
+                "data" -> value = readMp4String(raf, child.payload + 8, child.end)
+            }
+            position = child.end
+        }
+        if (meaning.equals("com.apple.iTunes", ignoreCase = true) && name != null && value != null) {
+            sink.accept(name, value)
+        }
+    }
+
+    private fun readMp4Data(raf: RandomAccessFile, start: Long, end: Long): String? {
+        var position = start
+        while (position + MP4_ATOM_HEADER_BYTES <= end) {
+            val child = readMp4Atom(raf, position, end) ?: return null
+            if (child.type == "data") return readMp4String(raf, child.payload + 8, child.end)
+            position = child.end
+        }
+        return null
+    }
+
+    private fun readMp4String(raf: RandomAccessFile, start: Long, end: Long): String? {
+        val length = end - start
+        if (length <= 0 || length > MAX_BLOCK_BYTES) return null
+        val bytes = ByteArray(length.toInt())
+        raf.seek(start)
+        raf.readFully(bytes)
+        return String(bytes, Charsets.UTF_8).trim(NUL, ' ').takeIf { it.isNotEmpty() }
+    }
+
+    private data class Mp4Atom(val type: String, val payload: Long, val end: Long)
+
+    private fun readMp4Atom(raf: RandomAccessFile, start: Long, parentEnd: Long): Mp4Atom? {
+        raf.seek(start)
+        val size32 = raf.readInt().toLong() and 0xFFFF_FFFFL
+        val typeBytes = ByteArray(4)
+        raf.readFully(typeBytes)
+        var header = MP4_ATOM_HEADER_BYTES.toLong()
+        val size = when (size32) {
+            0L -> parentEnd - start
+            1L -> {
+                if (start + MP4_EXTENDED_HEADER_BYTES > parentEnd) return null
+                header = MP4_EXTENDED_HEADER_BYTES.toLong()
+                raf.readLong().takeIf { it >= header } ?: return null
+            }
+            else -> size32
+        }
+        val atomEnd = start + size
+        if (size < header || atomEnd <= start || atomEnd > parentEnd) return null
+        return Mp4Atom(String(typeBytes, Charsets.ISO_8859_1), start + header, atomEnd)
     }
 
     // ---- Ogg (Vorbis, Opus, Ogg FLAC) --------------------------------------
@@ -333,4 +440,8 @@ internal object TagReader {
     private const val MAX_BLOCK_BYTES = 1 shl 20
     private const val MAX_OGG_PACKETS = 8
     private const val MAX_COMMENTS = 1024
+    private const val MP4_ATOM_HEADER_BYTES = 8
+    private const val MP4_EXTENDED_HEADER_BYTES = 16
+    private const val MAX_MP4_DEPTH = 6
+    private const val MAX_MP4_ATOMS = 10_000
 }
