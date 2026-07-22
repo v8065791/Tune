@@ -138,6 +138,7 @@ fun HomeScreen(
                 onQueue = { vm.queueSelection(visibleSongs) },
                 onAddToPlaylist = onSelectionToPlaylist,
                 onSetGenre = onSelectionSetGenre,
+                onDelete = { vm.promptDeleteSelection(visibleSongs) },
             ) else TopAppBar(
                 title = { Text("Tune") },
                 actions = {

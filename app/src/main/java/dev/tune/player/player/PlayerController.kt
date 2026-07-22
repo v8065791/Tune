@@ -181,6 +181,17 @@ class PlayerController(private val context: Context, private val scope: Coroutin
         syncState()
     }
 
+    /** Removes deleted files from the active queue so playback never advances to a stale URI. */
+    fun removeSongs(songIds: Set<Long>) {
+        if (songIds.isEmpty()) return
+        val player = controller ?: return
+        for (index in player.mediaItemCount - 1 downTo 0) {
+            val songId = player.getMediaItemAt(index).mediaId.toLongOrNull()
+            if (songId != null && songId in songIds) player.removeMediaItem(index)
+        }
+        syncState()
+    }
+
     /**
      * Scales output volume, used to apply ReplayGain. This is the player's own volume, separate
      * from the device volume the user sets with the hardware keys.

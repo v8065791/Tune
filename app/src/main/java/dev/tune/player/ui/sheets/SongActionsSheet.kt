@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -43,6 +44,7 @@ fun SongActionsSheet(
     onGoToArtist: () -> Unit,
     onShowMetadata: () -> Unit,
     onSetGenre: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
@@ -78,6 +80,7 @@ fun SongActionsSheet(
             ActionRow(Icons.Default.Person, "Go to artist") { onGoToArtist(); onDismiss() }
             ActionRow(Icons.Default.Category, "Set genre") { onSetGenre() }
             ActionRow(Icons.Default.Info, "View metadata") { onShowMetadata() }
+            ActionRow(Icons.Default.Delete, "Delete audio file") { onDelete() }
         }
     }
 }

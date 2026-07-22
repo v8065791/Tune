@@ -1,7 +1,11 @@
 package dev.tune.player.ui
 
+import android.app.RecoverableSecurityException
 import android.app.Application
+import android.content.IntentSender
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.tune.player.TuneApplication
@@ -67,6 +71,9 @@ data class SearchResults(
     val isEmpty: Boolean
         get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && genres.isEmpty()
 }
+
+/** A system-owned confirmation that Tune must launch before deleting media. */
+data class MediaDeleteRequest(val intentSender: IntentSender)
 
 private data class SearchEntry<T>(val value: T, val text: String)
 
@@ -189,6 +196,145 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val songs = selectedSongs(from)
         if (songs.isNotEmpty()) addToPlaylist(playlistId, songs.map { it.id })
         clearSelection()
+    }
+
+    // ---- File deletion -----------------------------------------------------
+
+    private val _deleteConfirmation = MutableStateFlow<List<Song>>(emptyList())
+    val deleteConfirmation: StateFlow<List<Song>> = _deleteConfirmation.asStateFlow()
+
+    private val _mediaDeleteRequest = MutableStateFlow<MediaDeleteRequest?>(null)
+    val mediaDeleteRequest: StateFlow<MediaDeleteRequest?> = _mediaDeleteRequest.asStateFlow()
+
+    private data class ActiveDeleteRequest(
+        val pendingSongs: List<Song>,
+        val deletedCount: Int,
+        val systemDeletesFiles: Boolean,
+    )
+
+    private var activeDeleteRequest: ActiveDeleteRequest? = null
+    private var deletingSongs: List<Song> = emptyList()
+
+    fun promptDelete(song: Song) {
+        _deleteConfirmation.value = listOf(song)
+    }
+
+    fun promptDeleteSelection(from: List<Song>) {
+        _deleteConfirmation.value = selectedSongs(from).distinctBy { it.id }
+    }
+
+    fun dismissDeleteConfirmation() {
+        _deleteConfirmation.value = emptyList()
+    }
+
+    fun deleteConfirmed() {
+        val songs = _deleteConfirmation.value.distinctBy { it.id }
+        _deleteConfirmation.value = emptyList()
+        if (songs.isEmpty()) return
+
+        deletingSongs = songs
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                    MediaStore.createDeleteRequest(
+                            getApplication<Application>().contentResolver,
+                            songs.map { it.uri },
+                        )
+                        .intentSender
+                }
+                .onSuccess { intentSender ->
+                    activeDeleteRequest =
+                        ActiveDeleteRequest(
+                            pendingSongs = songs,
+                            deletedCount = 0,
+                            systemDeletesFiles = true,
+                        )
+                    _mediaDeleteRequest.value = MediaDeleteRequest(intentSender)
+                }
+                .onFailure(::failDeletion)
+        } else {
+            deleteLegacy(songs, deletedCount = 0)
+        }
+    }
+
+    /** Prevents a consumed IntentSender from being launched again after recomposition. */
+    fun consumeMediaDeleteRequest() {
+        _mediaDeleteRequest.value = null
+    }
+
+    fun onMediaDeleteResult(approved: Boolean) {
+        val request = activeDeleteRequest ?: return
+        activeDeleteRequest = null
+        if (!approved) {
+            deletingSongs = emptyList()
+            _messages.value = "Deletion canceled"
+            return
+        }
+
+        if (request.systemDeletesFiles) {
+            finishDeletion(deletingSongs.size)
+        } else {
+            deleteLegacy(request.pendingSongs, request.deletedCount)
+        }
+    }
+
+    fun onMediaDeleteLaunchFailed(error: Throwable) {
+        activeDeleteRequest = null
+        failDeletion(error)
+    }
+
+    private fun deleteLegacy(songs: List<Song>, deletedCount: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var deleted = deletedCount
+            songs.forEachIndexed { index, song ->
+                try {
+                    if (getApplication<Application>().contentResolver.delete(song.uri, null, null) > 0) {
+                        deleted++
+                    }
+                } catch (error: SecurityException) {
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                            error is RecoverableSecurityException
+                    ) {
+                        withContext(Dispatchers.Main) {
+                            activeDeleteRequest =
+                                ActiveDeleteRequest(
+                                    pendingSongs = songs.drop(index),
+                                    deletedCount = deleted,
+                                    systemDeletesFiles = false,
+                                )
+                            _mediaDeleteRequest.value =
+                                MediaDeleteRequest(error.userAction.actionIntent.intentSender)
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) { failDeletion(error) }
+                    }
+                    return@launch
+                }
+            }
+            finishDeletion(deleted)
+        }
+    }
+
+    private fun finishDeletion(deletedCount: Int) {
+        val deletedSongs = deletingSongs
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.refresh()
+            withContext(Dispatchers.Main) {
+                player.removeSongs(deletedSongs.mapTo(mutableSetOf()) { it.id })
+                deletingSongs = emptyList()
+                clearSelection()
+                _messages.value =
+                    if (deletedCount == 1) "Deleted 1 audio file"
+                    else "Deleted $deletedCount audio files"
+            }
+        }
+    }
+
+    private fun failDeletion(error: Throwable) {
+        activeDeleteRequest = null
+        _mediaDeleteRequest.value = null
+        deletingSongs = emptyList()
+        _messages.value = "Delete failed: ${error.message ?: error::class.simpleName}"
     }
 
     // ---- Search ------------------------------------------------------------

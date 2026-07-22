@@ -206,6 +206,7 @@ private fun DetailSelectionBar(
         onQueue = { vm.queueSelection(songsInView) },
         onAddToPlaylist = onSelectionToPlaylist,
         onSetGenre = onSelectionSetGenre,
+        onDelete = { vm.promptDeleteSelection(songsInView) },
     )
 }
 

@@ -23,18 +23,21 @@ device, plays it, and stays out of the way.
   and repeat), pause on headphone disconnect, system equalizer handoff
 - **Playlists** — create, rename, delete, add and remove songs
 - **Portable library data** — JSON backup/restore and M3U8 playlist import/export
+- **Safe file deletion** — delete one song or a selection through Android's confirmation flow
 - **Sleep timer** — pause automatically after a chosen interval
 - **Appearance** — Material You, eight accent colours, AMOLED black, square or original-ratio
   covers
 
 ## The one rule
 
-**Tune never writes to your audio files.**
+**Tune never modifies the contents or metadata of your audio files.**
 
 Custom artwork and custom genres are stored in the app's own data directory and layered over each
-file's real tags when the library is built. This is a deliberate trade:
+file's real tags when the library is built. Files are removed only when the user explicitly chooses
+Delete and confirms the permanent action. This is a deliberate trade:
 
 - No bug in this app can corrupt a music file.
+- Deletion is isolated behind both Tune's warning and Android's MediaStore approval where required.
 - Those customisations are **not portable**. They live in Tune's data, so uninstalling or clearing
   its storage loses them, and they won't follow the files to another player or device.
 

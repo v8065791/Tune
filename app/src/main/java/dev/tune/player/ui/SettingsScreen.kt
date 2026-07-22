@@ -112,7 +112,7 @@ fun LibrarySettingsScreen(
         }
         item {
             ActionRow("Export Tune backup", "Save playlists, favourites, genres and play history") {
-                exportBackup.launch("tune-v3.5-backup.json")
+                exportBackup.launch("tune-v3.6-backup.json")
             }
         }
         item {

@@ -19,17 +19,24 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -207,7 +214,9 @@ fun SelectionTopBar(
     onQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onSetGenre: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    var overflowOpen by remember { mutableStateOf(false) }
     TopAppBar(
         title = { Text("$count selected") },
         navigationIcon = {
@@ -225,17 +234,42 @@ fun SelectionTopBar(
                     contentDescription = "Add selection to queue",
                 )
             }
-            IconButton(onClick = onAddToPlaylist) {
-                Icon(
-                    Icons.AutoMirrored.Filled.PlaylistAdd,
-                    contentDescription = "Add selection to playlist",
-                )
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete selected files")
             }
-            IconButton(onClick = onSetGenre) {
-                Icon(Icons.Default.Category, contentDescription = "Set genre for selection")
-            }
-            IconButton(onClick = onSelectAll) {
-                Icon(Icons.Default.SelectAll, contentDescription = "Select all")
+            Box {
+                IconButton(onClick = { overflowOpen = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More selection actions")
+                }
+                DropdownMenu(
+                    expanded = overflowOpen,
+                    onDismissRequest = { overflowOpen = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Add to playlist") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+                        onClick = {
+                            overflowOpen = false
+                            onAddToPlaylist()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Set genre") },
+                        leadingIcon = { Icon(Icons.Default.Category, null) },
+                        onClick = {
+                            overflowOpen = false
+                            onSetGenre()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Select all") },
+                        leadingIcon = { Icon(Icons.Default.SelectAll, null) },
+                        onClick = {
+                            overflowOpen = false
+                            onSelectAll()
+                        },
+                    )
+                }
             }
         },
     )

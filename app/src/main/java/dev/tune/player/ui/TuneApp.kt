@@ -1,7 +1,11 @@
 package dev.tune.player.ui
 
+import android.app.Activity
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -77,6 +81,22 @@ fun TuneApp(vm: MainViewModel) {
 
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val metadataSong by vm.metadataSong.collectAsStateWithLifecycle()
+    val deleteConfirmation by vm.deleteConfirmation.collectAsStateWithLifecycle()
+    val mediaDeleteRequest by vm.mediaDeleteRequest.collectAsStateWithLifecycle()
+
+    val deleteLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+            vm.onMediaDeleteResult(it.resultCode == Activity.RESULT_OK)
+        }
+    LaunchedEffect(mediaDeleteRequest) {
+        mediaDeleteRequest?.let { request ->
+            runCatching {
+                    deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                }
+                .onSuccess { vm.consumeMediaDeleteRequest() }
+                .onFailure(vm::onMediaDeleteLaunchFailed)
+        }
+    }
 
     // Sheet + dialog state, hoisted here so any screen can trigger them.
     var actionsSong by remember { mutableStateOf<Song?>(null) }
@@ -302,6 +322,33 @@ fun TuneApp(vm: MainViewModel) {
             onSetGenre = {
                 genreForSong = song
                 actionsSong = null
+            },
+            onDelete = {
+                vm.promptDelete(song)
+                actionsSong = null
+            },
+        )
+    }
+
+    if (deleteConfirmation.isNotEmpty()) {
+        val count = deleteConfirmation.size
+        AlertDialog(
+            onDismissRequest = vm::dismissDeleteConfirmation,
+            title = { Text(if (count == 1) "Delete audio file?" else "Delete $count audio files?") },
+            text = {
+                Text(
+                    if (count == 1) {
+                        "This permanently deletes “${deleteConfirmation.single().title}” from this device. This cannot be undone."
+                    } else {
+                        "This permanently deletes the selected audio files from this device. This cannot be undone."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = vm::deleteConfirmed) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = vm::dismissDeleteConfirmation) { Text("Cancel") }
             },
         )
     }

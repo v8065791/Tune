@@ -92,6 +92,9 @@ private fun PermissionGate(vm: MainViewModel, content: @Composable () -> Unit) {
             add(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
         }
     }
 
